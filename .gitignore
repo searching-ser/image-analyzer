@@ -1,0 +1,5 @@
+*.exe
+*.obj
+*.o
+arcl.txt
+resultados_rendimiento.csv
