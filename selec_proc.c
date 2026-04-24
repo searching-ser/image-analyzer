@@ -3,708 +3,548 @@
 #include <string.h>
 #include "selec_proc.h"
 
-extern void inv_img(char mask[], char path[])
+#define BMP_HEADER_SIZE 54
+
+typedef struct {
+    unsigned char header[BMP_HEADER_SIZE];
+    int width;
+    int height;
+    int row_padded;
+    unsigned char *data;
+} BmpImage;
+
+static int read_le_int(const unsigned char *bytes)
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
+    return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+}
+
+static int load_bmp(const char *path, BmpImage *bmp)
+{
+    FILE *image;
+    int data_size;
+
+    image = fopen(path, "rb");
+    if (image == NULL) {
+        printf("Error: No se pudo abrir %s\n", path);
+        return 0;
+    }
+
+    if (fread(bmp->header, 1, BMP_HEADER_SIZE, image) != BMP_HEADER_SIZE) {
+        fclose(image);
+        printf("Error: No se pudo leer la cabecera BMP\n");
+        return 0;
+    }
+
+    bmp->width = read_le_int(&bmp->header[18]);
+    bmp->height = read_le_int(&bmp->header[22]);
+    if (bmp->height < 0) {
+        bmp->height = -bmp->height;
+    }
+
+    bmp->row_padded = (bmp->width * 3 + 3) & (~3);
+    data_size = bmp->row_padded * bmp->height;
+    bmp->data = (unsigned char *)malloc((size_t)data_size);
+    if (bmp->data == NULL) {
+        fclose(image);
+        printf("Memory not allocated.\n");
+        return 0;
+    }
+
+    if (fread(bmp->data, 1, (size_t)data_size, image) != (size_t)data_size) {
+        free(bmp->data);
+        bmp->data = NULL;
+        fclose(image);
+        printf("Error: No se pudieron leer los datos BMP\n");
+        return 0;
+    }
+
+    fclose(image);
+    return 1;
+}
+
+static int save_bmp(const char *mask, const BmpImage *bmp)
+{
+    FILE *outputImage;
     char add_char[80] = "./img/";
+    int data_size = bmp->row_padded * bmp->height;
+
     strcat(add_char, mask);
     strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
 
-    image = fopen(path, "rb");              //Original Image
     outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
-        return;
+    if (outputImage == NULL) {
+        printf("Error: No se pudo crear %s\n", add_char);
+        return 0;
     }
 
-    //Definition of variables
-    int i, j;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    while (!feof(image)) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        arr_in[j] = 255 - b;
-        arr_in[j + 1] = 255 - g;
-        arr_in[j + 2] = 255 - r;
-        j = j + 3;
-    }
-
-    printf("lectura de datos: %d\n", j);
-    for (i = 0; i < ancho * alto * 3; i++) {
-        fputc(arr_in[i], outputImage);
-    }
-
-    free(arr_in);
-    fclose(image);
+    fwrite(bmp->header, 1, BMP_HEADER_SIZE, outputImage);
+    fwrite(bmp->data, 1, (size_t)data_size, outputImage);
     fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+
+    printf("%s\n", add_char);
+    return 1;
+}
+
+static void free_bmp(BmpImage *bmp)
+{
+    free(bmp->data);
+    bmp->data = NULL;
+}
+
+static unsigned char to_gray(unsigned char b, unsigned char g, unsigned char r)
+{
+    return (unsigned char)(0.21 * r + 0.72 * g + 0.07 * b);
+}
+
+extern void inv_img(char mask[], char path[])
+{
+    BmpImage bmp;
+    int y;
+    int x;
+
+    if (!load_bmp(path, &bmp)) {
+        return;
+    }
+
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        for (x = 0; x < bmp.width; x++) {
+            int idx = x * 3;
+            unsigned char b = row[idx];
+            unsigned char g = row[idx + 1];
+            unsigned char r = row[idx + 2];
+            unsigned char pixel = to_gray(b, g, r);
+
+            row[idx] = pixel;
+            row[idx + 1] = pixel;
+            row[idx + 2] = pixel;
+        }
+    }
+
+    {
+        unsigned char *temp = (unsigned char *)malloc((size_t)(bmp.row_padded * bmp.height));
+        if (temp == NULL) {
+            printf("Memory not allocated.\n");
+            free_bmp(&bmp);
+            return;
+        }
+
+        for (y = 0; y < bmp.height; y++) {
+            memcpy(
+                temp + y * bmp.row_padded,
+                bmp.data + (bmp.height - 1 - y) * bmp.row_padded,
+                (size_t)bmp.row_padded
+            );
+        }
+
+        memcpy(bmp.data, temp, (size_t)(bmp.row_padded * bmp.height));
+        free(temp);
+    }
+
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void inv_img_grey(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    int y;
+    int x;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b, pixel;           //Pixel
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        for (x = 0; x < bmp.width; x++) {
+            int idx = x * 3;
+            unsigned char pixel = to_gray(row[idx], row[idx + 1], row[idx + 2]);
 
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
+            row[idx] = pixel;
+            row[idx + 1] = pixel;
+            row[idx + 2] = pixel;
+        }
     }
 
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    while (!feof(image)) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        pixel = 0.21 * r + 0.72 * g + 0.07 * b;
-        arr_in[j] = pixel;
-        j++;
-    }
-
-    printf("lectura de datos: %d\n", j * 3);
-    printf("elementos faltantes: %ld\n", (ancho * alto) - j);
-    for (i = 0; i < ancho * alto; i++) {
-        fputc(arr_in[i], outputImage);
-        fputc(arr_in[i], outputImage);
-        fputc(arr_in[i], outputImage);
-    }
-
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void inv_img_color(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    unsigned char *temp;
+    int y;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
+    temp = (unsigned char *)malloc((size_t)(bmp.row_padded * bmp.height));
+    if (temp == NULL) {
         printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
+        free_bmp(&bmp);
         return;
     }
 
-    j = 0;
-    while (!feof(image)) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        arr_in[j] = g;
-        arr_in[j + 1] = r;
-        arr_in[j + 2] = b;
-        j = j + 3;
+    for (y = 0; y < bmp.height; y++) {
+        memcpy(
+            temp + y * bmp.row_padded,
+            bmp.data + (bmp.height - 1 - y) * bmp.row_padded,
+            (size_t)bmp.row_padded
+        );
     }
 
-    printf("lectura de datos: %d\n", j);
-    for (i = 0; i < ancho * alto * 3; i++) {
-        fputc(arr_in[i], outputImage);
-    }
+    memcpy(bmp.data, temp, (size_t)(bmp.row_padded * bmp.height));
+    free(temp);
 
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void inv_img_grey_horizontal(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    int y;
+    int x;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j, fila, col, pos;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        unsigned char *out_row = (unsigned char *)malloc((size_t)bmp.row_padded);
 
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        unsigned char pixel = 0.21 * r + 0.72 * g + 0.07 * b;
-        arr_in[j] = pixel;
-        arr_in[j + 1] = pixel;
-        arr_in[j + 2] = pixel;
-        j = j + 3;
-    }
-
-    printf("lectura de datos: %d\n", j);
-    for (fila = 0; fila < alto; fila++) {
-        for (col = ancho - 1; col >= 0; col--) {
-            pos = (fila * ancho * 3) + (col * 3);
-            fputc(arr_in[pos], outputImage);
-            fputc(arr_in[pos + 1], outputImage);
-            fputc(arr_in[pos + 2], outputImage);
+        if (out_row == NULL) {
+            printf("Memory not allocated.\n");
+            free_bmp(&bmp);
+            return;
         }
+
+        memcpy(out_row, row, (size_t)bmp.row_padded);
+        for (x = 0; x < bmp.width; x++) {
+            int orig_idx = x * 3;
+            int new_idx = (bmp.width - 1 - x) * 3;
+            unsigned char pixel = to_gray(row[orig_idx], row[orig_idx + 1], row[orig_idx + 2]);
+
+            out_row[new_idx] = pixel;
+            out_row[new_idx + 1] = pixel;
+            out_row[new_idx + 2] = pixel;
+        }
+
+        memcpy(row, out_row, (size_t)bmp.row_padded);
+        free(out_row);
     }
 
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void inv_img_color_horizontal(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    int y;
+    int x;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j, fila, col, pos;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        unsigned char *out_row = (unsigned char *)malloc((size_t)bmp.row_padded);
 
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        arr_in[j] = b;
-        arr_in[j + 1] = g;
-        arr_in[j + 2] = r;
-        j = j + 3;
-    }
-
-    printf("lectura de datos: %d\n", j);
-    for (fila = 0; fila < alto; fila++) {
-        for (col = ancho - 1; col >= 0; col--) {
-            pos = (fila * ancho * 3) + (col * 3);
-            fputc(arr_in[pos], outputImage);
-            fputc(arr_in[pos + 1], outputImage);
-            fputc(arr_in[pos + 2], outputImage);
+        if (out_row == NULL) {
+            printf("Memory not allocated.\n");
+            free_bmp(&bmp);
+            return;
         }
+
+        memcpy(out_row, row, (size_t)bmp.row_padded);
+        for (x = 0; x < bmp.width; x++) {
+            int orig_idx = x * 3;
+            int new_idx = (bmp.width - 1 - x) * 3;
+
+            out_row[new_idx] = row[orig_idx];
+            out_row[new_idx + 1] = row[orig_idx + 1];
+            out_row[new_idx + 2] = row[orig_idx + 2];
+        }
+
+        memcpy(row, out_row, (size_t)bmp.row_padded);
+        free(out_row);
     }
 
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void inv_img_grey_vertical(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
-
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
-        return;
-    }
-
-    //Definition of variables
-    int i, j, fila, col, pos;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b, pixel;           //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        pixel = 0.21 * r + 0.72 * g + 0.07 * b;
-        arr_in[j] = pixel;
-        arr_in[j + 1] = pixel;
-        arr_in[j + 2] = pixel;
-        j = j + 3;
-    }
-
-    printf("lectura de datos: %d\n", j);
-    for (fila = alto - 1; fila >= 0; fila--) {
-        for (col = 0; col < ancho; col++) {
-            pos = (fila * ancho * 3) + (col * 3);
-            fputc(arr_in[pos], outputImage);
-            fputc(arr_in[pos + 1], outputImage);
-            fputc(arr_in[pos + 2], outputImage);
-        }
-    }
-
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    inv_img(mask, path);
 }
 
 extern void inv_img_color_vertical(char mask[], char path[])
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
-
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
-        return;
-    }
-
-    //Definition of variables
-    int i, j, fila, col, pos;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL) {
-        printf("Memory not allocated.\n");
-        fclose(image);
-        fclose(outputImage);
-        return;
-    }
-
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        arr_in[j] = b;
-        arr_in[j + 1] = g;
-        arr_in[j + 2] = r;
-        j = j + 3;
-    }
-
-    printf("lectura de datos: %d\n", j);
-    for (fila = alto - 1; fila >= 0; fila--) {
-        for (col = 0; col < ancho; col++) {
-            pos = (fila * ancho * 3) + (col * 3);
-            fputc(arr_in[pos], outputImage);
-            fputc(arr_in[pos + 1], outputImage);
-            fputc(arr_in[pos + 2], outputImage);
-        }
-    }
-
-    free(arr_in);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    inv_img_color(mask, path);
 }
 
 extern void desenfoque_grey(char path[], char mask[], int kernel)
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    unsigned char *gray_in;
+    unsigned char *gray_tmp;
+    unsigned char *gray_out;
+    int y;
+    int x;
+    int k;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j, fila, col, kx, ky, pos, pos2;
-    int suma, contador, radio;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b, pixel;           //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * sizeof(unsigned char));
-    unsigned char *arr_out = (unsigned char *)malloc(ancho * alto * sizeof(unsigned char));
-    if (arr_in == NULL || arr_out == NULL) {
+    gray_in = (unsigned char *)malloc((size_t)(bmp.width * bmp.height));
+    gray_tmp = (unsigned char *)malloc((size_t)(bmp.width * bmp.height));
+    gray_out = (unsigned char *)malloc((size_t)(bmp.width * bmp.height));
+    if (gray_in == NULL || gray_tmp == NULL || gray_out == NULL) {
         printf("Memory not allocated.\n");
-        free(arr_in);
-        free(arr_out);
-        fclose(image);
-        fclose(outputImage);
+        free(gray_in);
+        free(gray_tmp);
+        free(gray_out);
+        free_bmp(&bmp);
         return;
     }
 
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        pixel = 0.21 * r + 0.72 * g + 0.07 * b;
-        arr_in[j] = pixel;
-        j++;
-    }
-
-    radio = (kernel - 1) / 2;
-    for (fila = 0; fila < alto; fila++) {
-        for (col = 0; col < ancho; col++) {
-            suma = 0;
-            contador = 0;
-
-            for (ky = -radio; ky <= radio; ky++) {
-                for (kx = -radio; kx <= radio; kx++) {
-                    if (fila + ky >= 0 && fila + ky < alto && col + kx >= 0 && col + kx < ancho) {
-                        pos2 = ((fila + ky) * ancho) + (col + kx);
-                        suma = suma + arr_in[pos2];
-                        contador++;
-                    }
-                }
-            }
-
-            pos = (fila * ancho) + col;
-            arr_out[pos] = suma / contador;
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        for (x = 0; x < bmp.width; x++) {
+            int idx = x * 3;
+            gray_in[y * bmp.width + x] = to_gray(row[idx], row[idx + 1], row[idx + 2]);
         }
     }
 
-    printf("lectura de datos: %d\n", j);
-    for (i = 0; i < ancho * alto; i++) {
-        fputc(arr_out[i], outputImage);
-        fputc(arr_out[i], outputImage);
-        fputc(arr_out[i], outputImage);
+    k = kernel / 2;
+
+    for (y = 0; y < bmp.height; y++) {
+        int sum = 0;
+
+        for (x = 0; x < bmp.width; x++) {
+            int left = x - k;
+            int right = x + k;
+
+            if (x == 0) {
+                int dx;
+                sum = 0;
+                for (dx = -k; dx <= k; dx++) {
+                    int nx = x + dx;
+                    if (nx >= 0 && nx < bmp.width) {
+                        sum += gray_in[y * bmp.width + nx];
+                    }
+                }
+            } else {
+                if (left - 1 >= 0) {
+                    sum -= gray_in[y * bmp.width + (left - 1)];
+                }
+                if (right < bmp.width) {
+                    sum += gray_in[y * bmp.width + right];
+                }
+            }
+
+            {
+                int valid_left = left < 0 ? 0 : left;
+                int valid_right = right >= bmp.width ? bmp.width - 1 : right;
+                int count = valid_right - valid_left + 1;
+                gray_tmp[y * bmp.width + x] = (unsigned char)(sum / count);
+            }
+        }
     }
 
-    free(arr_in);
-    free(arr_out);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    for (x = 0; x < bmp.width; x++) {
+        int sum = 0;
+
+        for (y = 0; y < bmp.height; y++) {
+            int top = y - k;
+            int bottom = y + k;
+
+            if (y == 0) {
+                int dy;
+                sum = 0;
+                for (dy = -k; dy <= k; dy++) {
+                    int ny = y + dy;
+                    if (ny >= 0 && ny < bmp.height) {
+                        sum += gray_tmp[ny * bmp.width + x];
+                    }
+                }
+            } else {
+                if (top - 1 >= 0) {
+                    sum -= gray_tmp[(top - 1) * bmp.width + x];
+                }
+                if (bottom < bmp.height) {
+                    sum += gray_tmp[bottom * bmp.width + x];
+                }
+            }
+
+            {
+                int valid_top = top < 0 ? 0 : top;
+                int valid_bottom = bottom >= bmp.height ? bmp.height - 1 : bottom;
+                int count = valid_bottom - valid_top + 1;
+                gray_out[y * bmp.width + x] = (unsigned char)(sum / count);
+            }
+        }
+    }
+
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *row = bmp.data + y * bmp.row_padded;
+        for (x = 0; x < bmp.width; x++) {
+            int idx = x * 3;
+            unsigned char pixel = gray_out[y * bmp.width + x];
+
+            row[idx] = pixel;
+            row[idx + 1] = pixel;
+            row[idx + 2] = pixel;
+        }
+    }
+
+    free(gray_in);
+    free(gray_tmp);
+    free(gray_out);
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void desenfoque_color(char path[], char mask[], int kernel)
 {
-    FILE *image, *outputImage, *lecturas, *fptr;
-    char add_char[80] = "./img/";
-    strcat(add_char, mask);
-    strcat(add_char, ".bmp");
-    printf("%s\n", add_char);
+    BmpImage bmp;
+    unsigned char *temp;
+    int y;
+    int x;
+    int k;
 
-    image = fopen(path, "rb");              //Original Image
-    outputImage = fopen(add_char, "wb");
-
-    if (image == NULL || outputImage == NULL) {
-        printf("Error opening file\n");
+    if (!load_bmp(path, &bmp)) {
         return;
     }
 
-    //Definition of variables
-    int i, j, fila, col, kx, ky, pos, pos2;
-    int suma_b, suma_g, suma_r, contador, radio;
-    long ancho, tam, bpp;
-    long alto;
-    unsigned char r, g, b;                  //Pixel
-
-    unsigned char xx[54];
-    for (i = 0; i < 54; i++) {
-        xx[i] = fgetc(image);
-        fputc(xx[i], outputImage);          //Copia cabecera a nueva imagen
-    }
-
-    tam = (long)xx[4] * 65536 + (long)xx[3] * 256 + (long)xx[2];
-    bpp = (long)xx[29] * 256 + (long)xx[28];
-    ancho = (long)xx[20] * 65536 + (long)xx[19] * 256 + (long)xx[18];
-    alto = (long)xx[24] * 65536 + (long)xx[23] * 256 + (long)xx[22];
-
-    printf("tamano archivo %li\n", tam);
-    printf("bits por pixel %li\n", bpp);
-    printf("largo img %li\n", alto);
-    printf("ancho img %li\n", ancho);
-
-    unsigned char *arr_in = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    unsigned char *arr_out = (unsigned char *)malloc(ancho * alto * 3 * sizeof(unsigned char));
-    if (arr_in == NULL || arr_out == NULL) {
+    temp = (unsigned char *)malloc((size_t)(bmp.row_padded * bmp.height));
+    if (temp == NULL) {
         printf("Memory not allocated.\n");
-        free(arr_in);
-        free(arr_out);
-        fclose(image);
-        fclose(outputImage);
+        free_bmp(&bmp);
         return;
     }
 
-    j = 0;
-    for (i = 0; i < ancho * alto; i++) {
-        b = fgetc(image);
-        g = fgetc(image);
-        r = fgetc(image);
-        arr_in[j] = b;
-        arr_in[j + 1] = g;
-        arr_in[j + 2] = r;
-        j = j + 3;
-    }
+    k = kernel / 2;
 
-    radio = (kernel - 1) / 2;
-    for (fila = 0; fila < alto; fila++) {
-        for (col = 0; col < ancho; col++) {
-            suma_b = 0;
-            suma_g = 0;
-            suma_r = 0;
-            contador = 0;
+    for (y = 0; y < bmp.height; y++) {
+        unsigned char *src_row = bmp.data + y * bmp.row_padded;
+        unsigned char *tmp_row = temp + y * bmp.row_padded;
+        int sum_b = 0;
+        int sum_g = 0;
+        int sum_r = 0;
 
-            for (ky = -radio; ky <= radio; ky++) {
-                for (kx = -radio; kx <= radio; kx++) {
-                    if (fila + ky >= 0 && fila + ky < alto && col + kx >= 0 && col + kx < ancho) {
-                        pos2 = ((fila + ky) * ancho * 3) + ((col + kx) * 3);
-                        suma_b = suma_b + arr_in[pos2];
-                        suma_g = suma_g + arr_in[pos2 + 1];
-                        suma_r = suma_r + arr_in[pos2 + 2];
-                        contador++;
+        memcpy(tmp_row, src_row, (size_t)bmp.row_padded);
+
+        for (x = 0; x < bmp.width; x++) {
+            int left = x - k;
+            int right = x + k;
+            int idx = x * 3;
+
+            if (x == 0) {
+                int dx;
+                sum_b = 0;
+                sum_g = 0;
+                sum_r = 0;
+                for (dx = -k; dx <= k; dx++) {
+                    int nx = x + dx;
+                    if (nx >= 0 && nx < bmp.width) {
+                        int nidx = nx * 3;
+                        sum_b += src_row[nidx];
+                        sum_g += src_row[nidx + 1];
+                        sum_r += src_row[nidx + 2];
                     }
+                }
+            } else {
+                if (left - 1 >= 0) {
+                    int lidx = (left - 1) * 3;
+                    sum_b -= src_row[lidx];
+                    sum_g -= src_row[lidx + 1];
+                    sum_r -= src_row[lidx + 2];
+                }
+                if (right < bmp.width) {
+                    int ridx = right * 3;
+                    sum_b += src_row[ridx];
+                    sum_g += src_row[ridx + 1];
+                    sum_r += src_row[ridx + 2];
                 }
             }
 
-            pos = (fila * ancho * 3) + (col * 3);
-            arr_out[pos] = suma_b / contador;
-            arr_out[pos + 1] = suma_g / contador;
-            arr_out[pos + 2] = suma_r / contador;
+            {
+                int valid_left = left < 0 ? 0 : left;
+                int valid_right = right >= bmp.width ? bmp.width - 1 : right;
+                int count = valid_right - valid_left + 1;
+                tmp_row[idx] = (unsigned char)(sum_b / count);
+                tmp_row[idx + 1] = (unsigned char)(sum_g / count);
+                tmp_row[idx + 2] = (unsigned char)(sum_r / count);
+            }
         }
     }
 
-    printf("lectura de datos: %d\n", j);
-    for (i = 0; i < ancho * alto * 3; i++) {
-        fputc(arr_out[i], outputImage);
+    for (x = 0; x < bmp.width; x++) {
+        int sum_b = 0;
+        int sum_g = 0;
+        int sum_r = 0;
+
+        for (y = 0; y < bmp.height; y++) {
+            int top = y - k;
+            int bottom = y + k;
+            unsigned char *out_row = bmp.data + y * bmp.row_padded;
+            int idx = x * 3;
+
+            if (y == 0) {
+                int dy;
+                sum_b = 0;
+                sum_g = 0;
+                sum_r = 0;
+                for (dy = -k; dy <= k; dy++) {
+                    int ny = y + dy;
+                    if (ny >= 0 && ny < bmp.height) {
+                        unsigned char *tmp_row = temp + ny * bmp.row_padded;
+                        int tidx = x * 3;
+                        sum_b += tmp_row[tidx];
+                        sum_g += tmp_row[tidx + 1];
+                        sum_r += tmp_row[tidx + 2];
+                    }
+                }
+            } else {
+                if (top - 1 >= 0) {
+                    unsigned char *top_row = temp + (top - 1) * bmp.row_padded;
+                    int tidx = x * 3;
+                    sum_b -= top_row[tidx];
+                    sum_g -= top_row[tidx + 1];
+                    sum_r -= top_row[tidx + 2];
+                }
+                if (bottom < bmp.height) {
+                    unsigned char *bottom_row = temp + bottom * bmp.row_padded;
+                    int tidx = x * 3;
+                    sum_b += bottom_row[tidx];
+                    sum_g += bottom_row[tidx + 1];
+                    sum_r += bottom_row[tidx + 2];
+                }
+            }
+
+            {
+                int valid_top = top < 0 ? 0 : top;
+                int valid_bottom = bottom >= bmp.height ? bmp.height - 1 : bottom;
+                int count = valid_bottom - valid_top + 1;
+                out_row[idx] = (unsigned char)(sum_b / count);
+                out_row[idx + 1] = (unsigned char)(sum_g / count);
+                out_row[idx + 2] = (unsigned char)(sum_r / count);
+            }
+        }
     }
 
-    free(arr_in);
-    free(arr_out);
-    fclose(image);
-    fclose(outputImage);
-    (void)lecturas;
-    (void)fptr;
+    free(temp);
+    save_bmp(mask, &bmp);
+    free_bmp(&bmp);
 }
 
 extern void desenfoque(char path[], char mask[], int kernel)
