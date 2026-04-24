@@ -83,62 +83,62 @@ int main()
             {
                 /* ================== IMAGEN 1 ================== */
                 #pragma omp section
-                inv_img(img1_inv_ver, "./img/img1.bmp");
+                inv_img(img1_inv_ver, "./input/prueba1.bmp");
 
                 #pragma omp section
-                inv_img_color(img1_col_ver, "./img/img1.bmp");
+                inv_img_color(img1_col_ver, "./input/prueba1.bmp");
 
                 #pragma omp section
-                inv_img_grey_horizontal(img1_inv_hor, "./img/img1.bmp");
+                inv_img_grey_horizontal(img1_inv_hor, "./input/prueba1.bmp");
 
                 #pragma omp section
-                inv_img_color_horizontal(img1_col_hor, "./img/img1.bmp");
+                inv_img_color_horizontal(img1_col_hor, "./input/prueba1.bmp");
 
                 #pragma omp section
-                desenfoque("./img/img1.bmp", img1_desenf_col, 27);
+                desenfoque("./input/prueba1.bmp", img1_desenf_col, 27);
 
                 #pragma omp section
-                desenfoque_grey("./img/img1.bmp", img1_desenf_gry, 27);
+                desenfoque_grey("./input/prueba1.bmp", img1_desenf_gry, 27);
 
 
                 /* ================== IMAGEN 2 ================== */
                 #pragma omp section
-                inv_img(img2_inv_ver, "./img/img2.bmp");
+                inv_img(img2_inv_ver, "./input/prueba2.bmp");
 
                 #pragma omp section
-                inv_img_color(img2_col_ver, "./img/img2.bmp");
+                inv_img_color(img2_col_ver, "./input/prueba2.bmp");
 
                 #pragma omp section
-                inv_img_grey_horizontal(img2_inv_hor, "./img/img2.bmp");
+                inv_img_grey_horizontal(img2_inv_hor, "./input/prueba2.bmp");
 
                 #pragma omp section
-                inv_img_color_horizontal(img2_col_hor, "./img/img2.bmp");
+                inv_img_color_horizontal(img2_col_hor, "./input/prueba2.bmp");
 
                 #pragma omp section
-                desenfoque("./img/img2.bmp", img2_desenf_col, 27);
+                desenfoque("./input/prueba2.bmp", img2_desenf_col, 27);
 
                 #pragma omp section
-                desenfoque_grey("./img/img2.bmp", img2_desenf_gry, 27);
+                desenfoque_grey("./input/prueba2.bmp", img2_desenf_gry, 27);
 
 
                 /* ================== IMAGEN 3 ================== */
                 #pragma omp section
-                inv_img(img3_inv_ver, "./img/img3.bmp");
+                inv_img(img3_inv_ver, "./input/prueba3.bmp");
 
                 #pragma omp section
-                inv_img_color(img3_col_ver, "./img/img3.bmp");
+                inv_img_color(img3_col_ver, "./input/prueba3.bmp");
 
                 #pragma omp section
-                inv_img_grey_horizontal(img3_inv_hor, "./img/img3.bmp");
+                inv_img_grey_horizontal(img3_inv_hor, "./input/prueba3.bmp");
 
                 #pragma omp section
-                inv_img_color_horizontal(img3_col_hor, "./img/img3.bmp");
+                inv_img_color_horizontal(img3_col_hor, "./input/prueba3.bmp");
 
                 #pragma omp section
-                desenfoque("./img/img3.bmp", img3_desenf_col, 27);
+                desenfoque("./input/prueba3.bmp", img3_desenf_col, 27);
 
                 #pragma omp section
-                desenfoque_grey("./img/img3.bmp", img3_desenf_gry, 27);
+                desenfoque_grey("./input/prueba3.bmp", img3_desenf_gry, 27);
             }
         }
 
