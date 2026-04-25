@@ -3,10 +3,9 @@
 #include <string.h>
 #include "selec_proc.h"
 
-#define BMP_HEADER_SIZE 54
-
 typedef struct {
-    unsigned char header[BMP_HEADER_SIZE];
+    unsigned char *header;
+    int header_size;
     int width;
     int height;
     int row_padded;
@@ -21,7 +20,9 @@ static int read_le_int(const unsigned char *bytes)
 static int load_bmp(const char *path, BmpImage *bmp)
 {
     FILE *image;
+    unsigned char file_header[54];
     int data_size;
+    int data_offset;
 
     image = fopen(path, "rb");
     if (image == NULL) {
@@ -29,10 +30,30 @@ static int load_bmp(const char *path, BmpImage *bmp)
         return 0;
     }
 
-    if (fread(bmp->header, 1, BMP_HEADER_SIZE, image) != BMP_HEADER_SIZE) {
+    if (fread(file_header, 1, 54, image) != 54) {
         fclose(image);
         printf("Error: No se pudo leer la cabecera BMP\n");
         return 0;
+    }
+
+    data_offset = read_le_int(&file_header[10]);
+    bmp->header_size = data_offset;
+    bmp->header = (unsigned char *)malloc((size_t)bmp->header_size);
+    if (bmp->header == NULL) {
+        fclose(image);
+        printf("Memory not allocated.\n");
+        return 0;
+    }
+
+    memcpy(bmp->header, file_header, 54);
+    if (bmp->header_size > 54) {
+        if (fread(bmp->header + 54, 1, (size_t)(bmp->header_size - 54), image) != (size_t)(bmp->header_size - 54)) {
+            free(bmp->header);
+            bmp->header = NULL;
+            fclose(image);
+            printf("Error: No se pudo leer la cabecera extendida BMP\n");
+            return 0;
+        }
     }
 
     bmp->width = read_le_int(&bmp->header[18]);
@@ -45,12 +66,16 @@ static int load_bmp(const char *path, BmpImage *bmp)
     data_size = bmp->row_padded * bmp->height;
     bmp->data = (unsigned char *)malloc((size_t)data_size);
     if (bmp->data == NULL) {
+        free(bmp->header);
+        bmp->header = NULL;
         fclose(image);
         printf("Memory not allocated.\n");
         return 0;
     }
 
     if (fread(bmp->data, 1, (size_t)data_size, image) != (size_t)data_size) {
+        free(bmp->header);
+        bmp->header = NULL;
         free(bmp->data);
         bmp->data = NULL;
         fclose(image);
@@ -77,7 +102,7 @@ static int save_bmp(const char *mask, const BmpImage *bmp)
         return 0;
     }
 
-    fwrite(bmp->header, 1, BMP_HEADER_SIZE, outputImage);
+    fwrite(bmp->header, 1, (size_t)bmp->header_size, outputImage);
     fwrite(bmp->data, 1, (size_t)data_size, outputImage);
     fclose(outputImage);
 
@@ -87,6 +112,8 @@ static int save_bmp(const char *mask, const BmpImage *bmp)
 
 static void free_bmp(BmpImage *bmp)
 {
+    free(bmp->header);
+    bmp->header = NULL;
     free(bmp->data);
     bmp->data = NULL;
 }
