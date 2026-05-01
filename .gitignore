@@ -1,6 +1,8 @@
 *.exe
 *.obj
 *.o
+__pycache__/
+.venv/
 img/*.bmp
 arcl.txt
 resultados_rendimiento.csv
