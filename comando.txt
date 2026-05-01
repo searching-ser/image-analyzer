@@ -1,0 +1,2 @@
+gcc -Wall -Wextra -std=c11 -fopenmp para_image.c selec_proc.c -o para_image.exe
+.\para_image.exe
