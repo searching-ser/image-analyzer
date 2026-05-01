@@ -1,5 +1,6 @@
 import sys
 import subprocess
+from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
     QListWidget, QLabel, QCheckBox,
@@ -239,7 +240,15 @@ class App(QWidget):
             self.output_box.setText("No hay imágenes seleccionadas")
             return
 
-        cmd = ["para_image.exe", self.thread_selector.currentText()]
+        executable = Path(__file__).resolve().parent / "para_image.exe"
+        if not executable.exists():
+            self.output_box.setText(
+                "No se encontró para_image.exe.\n"
+                "Compila el procesador de imágenes antes de ejecutar."
+            )
+            return
+
+        cmd = [str(executable), self.thread_selector.currentText()]
 
         for i in range(self.list_widget.count()):
             cmd.append(self.list_widget.item(i).text())
@@ -254,8 +263,15 @@ class App(QWidget):
         self.output_box.setText("Procesando...\n")
 
         result = subprocess.run(cmd, capture_output=True, text=True)
+        output = result.stdout
 
-        self.output_box.setText(result.stdout)
+        if result.stderr:
+            output += "\n" + result.stderr
+
+        if result.returncode != 0:
+            output += f"\nEl proceso terminó con código {result.returncode}."
+
+        self.output_box.setText(output)
 
 
 app = QApplication(sys.argv)
