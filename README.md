@@ -1,76 +1,109 @@
-# Image Processing Benchmark
+# Image Analyzer
 
-This project processes 3 BMP images with OpenMP using 18 sections:
+Image Analyzer is a small desktop GUI for processing BMP images with a C/OpenMP backend. The Python app in `main.py` lets you select or drag up to 10 `.bmp` files, choose which transformations to apply, select the thread count, and run the compiled `para_image` program.
 
-- vertical inversion
-- vertical color inversion
-- horizontal grayscale inversion
-- horizontal color inversion
-- color blur
-- grayscale blur
+## Requirements
 
-The program runs the full workload three times using:
+- Python 3.9 or newer
+- A C compiler with OpenMP support
+- Python dependencies from `requirements.txt`
 
-- 6 threads
-- 12 threads
-- 18 threads
+On Windows, MinGW-w64 with OpenMP support is a good option. On macOS, the default Apple Clang usually does not include OpenMP, so install GCC with Homebrew:
 
-## Input Images
-
-Place these three source images inside the `img` folder:
-
-```text
-img/img1.bmp
-img/img2.bmp
-img/img3.bmp
+```bash
+brew install gcc
 ```
 
-They should be large BMP files.
+## Set Up Python
 
-## Compile
+Create and activate a virtual environment:
 
-From this folder, run:
+```bash
+python3 -m venv .venv
+```
+
+On macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Install the GUI dependency:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Compile the Image Processor
+
+`main.py` expects the executable to be named `para_image.exe`.
+
+On Windows with GCC:
 
 ```powershell
 gcc -Wall -Wextra -std=c11 -fopenmp para_image.c selec_proc.c -o para_image.exe
 ```
 
-## Run
+On macOS with Homebrew GCC, use the installed GCC version. For example:
 
-Run the program with:
-
-```powershell
-.\para_image.exe
+```bash
+gcc-15 -Wall -Wextra -std=c11 -fopenmp para_image.c selec_proc.c -o para_image.exe
 ```
+
+If your installed version is different, check it with:
+
+```bash
+ls /opt/homebrew/bin/gcc-*
+```
+
+On Linux:
+
+```bash
+gcc -Wall -Wextra -std=c11 -fopenmp para_image.c selec_proc.c -o para_image.exe
+```
+
+## Run the GUI
+
+From the project folder, run:
+
+```bash
+python main.py
+```
+
+## Use the App
+
+1. Add `.bmp` files with the file picker or drag them into the list.
+2. Select one or more processing options:
+   - Vertical Gris (`--vg`)
+   - Vertical Color (`--vc`)
+   - Horizontal Gris (`--hg`)
+   - Horizontal Color (`--hc`)
+   - Blur Gris (`--bg`)
+   - Blur Color (`--bc`)
+3. Choose the number of threads: `6`, `12`, or `18`.
+4. Click **Procesar**.
+
+If no processing option is selected, the C program applies all transformations.
 
 ## Output
 
-The generated BMP files are saved in the `img` folder.
+Generated BMP files are saved in the `img` folder. Output names use the source image name plus the selected transformation suffix.
 
-Their names include:
-
-- image number
-- thread count
-- transformation name
-
-Example:
+Examples:
 
 ```text
-img/1_t6_inv_ver.bmp
-img/2_t12_col_hor.bmp
-img/3_t18_desenf_gry.bmp
+img/prueba1_vg.bmp
+img/prueba1_vc.bmp
+img/prueba1_hg.bmp
+img/prueba1_hc.bmp
+img/prueba1_bg.bmp
+img/prueba1_bc.bmp
 ```
 
-## Timing Results
-
-Execution times are written to:
-
-```text
-resultados_rendimiento.csv
-```
-
-The CSV stores one row for each run:
-
-- 6 threads
-- 12 threads
-- 18 threads
+The app displays the processor output and total execution time in the results box.
