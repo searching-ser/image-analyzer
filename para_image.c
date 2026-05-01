@@ -4,80 +4,99 @@
 #include <omp.h>
 #include "selec_proc.h"
 
-int main()
+
+void get_base_name(const char *path, char *output) {
+    const char *start = strrchr(path, '/');
+    if (!start) start = strrchr(path, '\\');
+    start = start ? start + 1 : path;
+
+    strcpy(output, start);
+
+    char *dot = strrchr(output, '.');
+    if (dot) *dot = '\0';
+}
+
+int main(int argc, char *argv[])
 {
-    int num_threads = 18;
-    double t_start;
-    double t_end;
+    if (argc < 3) {
+        printf("Uso: para_image.exe <threads> img1.bmp ... [--vg --vc --hg --hc --bg --bc]\n");
+        return 1;
+    }
+
+    int num_threads = atoi(argv[1]);
+
+
+    int do_vg = 0; //vertical gris
+    int do_vc = 0; //vertical color
+    int do_hg = 0; //horizontal gris
+    int do_hc = 0; //horizontal color
+    int do_bg = 0; //blur gris
+    int do_bc = 0; //blur color
+
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--vg") == 0) do_vg = 1;
+        if (strcmp(argv[i], "--vc") == 0) do_vc = 1;
+        if (strcmp(argv[i], "--hg") == 0) do_hg = 1;
+        if (strcmp(argv[i], "--hc") == 0) do_hc = 1;
+        if (strcmp(argv[i], "--bg") == 0) do_bg = 1;
+        if (strcmp(argv[i], "--bc") == 0) do_bc = 1;
+    }
+
+    if (!do_vg && !do_vc && !do_hg && !do_hc && !do_bg && !do_bc) {
+        do_vg = do_vc = do_hg = do_hc = do_bg = do_bc = 1;
+    }
 
     omp_set_num_threads(num_threads);
 
-    t_start = omp_get_wtime();
+    double t_start = omp_get_wtime();
 
-    #pragma omp parallel
-    {
-        #pragma omp sections
-        {
-            /* ================== IMAGEN 1 ================== */
-            #pragma omp section
-            inv_img("1_inv_ver", "./input/prueba1.bmp");
+    #pragma omp parallel for
+    for (int i = 2; i < argc; i++) {
 
-            #pragma omp section
-            inv_img_color("1_col_ver", "./input/prueba1.bmp");
+   
+        if (argv[i][0] == '-') continue;
 
-            #pragma omp section
-            inv_img_grey_horizontal("1_inv_hor", "./input/prueba1.bmp");
+        char *path = argv[i];
 
-            #pragma omp section
-            inv_img_color_horizontal("1_col_hor", "./input/prueba1.bmp");
+        char base[100];
+        get_base_name(path, base);
 
-            #pragma omp section
-            desenfoque("./input/prueba1.bmp", "1_desenf_col", 27);
+        char mask[120];
 
-            #pragma omp section
-            desenfoque_grey("./input/prueba1.bmp", "1_desenf_gry", 27);
+        if (do_vg) {
+            sprintf(mask, "%s_vg", base);
+            inv_img(mask, path);
+        }
 
-            /* ================== IMAGEN 2 ================== */
-            #pragma omp section
-            inv_img("2_inv_ver", "./input/prueba2.bmp");
+        if (do_vc) {
+            sprintf(mask, "%s_vc", base);
+            inv_img_color(mask, path);
+        }
 
-            #pragma omp section
-            inv_img_color("2_col_ver", "./input/prueba2.bmp");
+        if (do_hg) {
+            sprintf(mask, "%s_hg", base);
+            inv_img_grey_horizontal(mask, path);
+        }
 
-            #pragma omp section
-            inv_img_grey_horizontal("2_inv_hor", "./input/prueba2.bmp");
+        if (do_hc) {
+            sprintf(mask, "%s_hc", base);
+            inv_img_color_horizontal(mask, path);
+        }
 
-            #pragma omp section
-            inv_img_color_horizontal("2_col_hor", "./input/prueba2.bmp");
+        if (do_bg) {
+            sprintf(mask, "%s_bg", base);
+            desenfoque_grey(path, mask, 27);
+        }
 
-            #pragma omp section
-            desenfoque("./input/prueba2.bmp", "2_desenf_col", 27);
-
-            #pragma omp section
-            desenfoque_grey("./input/prueba2.bmp", "2_desenf_gry", 27);
-
-            /* ================== IMAGEN 3 ================== */
-            #pragma omp section
-            inv_img("3_inv_ver", "./input/prueba3.bmp");
-
-            #pragma omp section
-            inv_img_color("3_col_ver", "./input/prueba3.bmp");
-
-            #pragma omp section
-            inv_img_grey_horizontal("3_inv_hor", "./input/prueba3.bmp");
-
-            #pragma omp section
-            inv_img_color_horizontal("3_col_hor", "./input/prueba3.bmp");
-
-            #pragma omp section
-            desenfoque("./input/prueba3.bmp", "3_desenf_col", 27);
-
-            #pragma omp section
-            desenfoque_grey("./input/prueba3.bmp", "3_desenf_gry", 27);
+        if (do_bc) {
+            sprintf(mask, "%s_bc", base);
+            desenfoque(path, mask, 27);
         }
     }
 
-    t_end = omp_get_wtime();
+    double t_end = omp_get_wtime();
+
     printf("Procesamiento terminado con %d threads.\n", num_threads);
     printf("Tiempo total de ejecucion: %f segundos\n", t_end - t_start);
 
