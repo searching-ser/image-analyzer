@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import shutil
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
@@ -7,6 +8,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QFileDialog, QComboBox, QTextEdit, QDialog
 )
 from PySide6.QtCore import Qt
+
+
+SHARED_ROOT = Path(r"\\emisan-pc\ImagAnShared")
+SHARED_INPUT_DIR = SHARED_ROOT / "input"
+SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
+MPI_EXECUTABLE_NAME = "para_image_mpi.exe"
+MAC_SHARED_ROOT = "/Users/ser/Universidad/ImagAnShared"
+MAC_PROJECT_DIR = "/Users/ser/Universidad/SisDis"
+MAC_EXECUTABLE_NAME = "para_image_mpi_mac"
+MPI_PROCESS_COUNT = 2
+MPI_HOSTS = ["emisan-pc", "sergios-macbook-air"]  # Cambia slave1-pc por el nombre Tailscale de tu esclava
 
 
 class DropListWidget(QListWidget):
@@ -240,29 +252,122 @@ class App(QWidget):
             self.output_box.setText("No hay imágenes seleccionadas")
             return
 
-        executable = Path(__file__).resolve().parent / "para_image.exe"
-        if not executable.exists():
+        project_dir = Path(__file__).resolve().parent
+        local_executable = project_dir / MPI_EXECUTABLE_NAME
+
+        if not SHARED_ROOT.exists():
             self.output_box.setText(
-                "No se encontró para_image.exe.\n"
-                "Compila el procesador de imágenes antes de ejecutar."
+                f"No se encontro la carpeta compartida:\n{SHARED_ROOT}\n\n"
+                "Verifica que el recurso compartido de emisan-pc este disponible por Tailscale."
             )
             return
 
-        cmd = [str(executable), self.thread_selector.currentText()]
+        if not local_executable.exists():
+            self.output_box.setText(
+                f"No se encontro {MPI_EXECUTABLE_NAME} en:\n{local_executable}\n\n"
+                "Compila el procesador MPI en el repo de la maestra."
+            )
+            return
 
-        for i in range(self.list_widget.count()):
-            cmd.append(self.list_widget.item(i).text())
+        try:
+            SHARED_INPUT_DIR.mkdir(exist_ok=True)
+            SHARED_OUTPUT_DIR.mkdir(exist_ok=True)
+        except OSError as exc:
+            self.output_box.setText(
+                f"No se pudieron preparar las carpetas compartidas input/output.\n{exc}"
+            )
+            return
 
-        if self.cb_vg.isChecked(): cmd.append("--vg")
-        if self.cb_vc.isChecked(): cmd.append("--vc")
-        if self.cb_hg.isChecked(): cmd.append("--hg")
-        if self.cb_hc.isChecked(): cmd.append("--hc")
-        if self.cb_bg.isChecked(): cmd.append("--bg")
-        if self.cb_bc.isChecked(): cmd.append("--bc")
+        image_paths = []
+        try:
+            for i in range(self.list_widget.count()):
+                source = Path(self.list_widget.item(i).text())
+                destination = SHARED_INPUT_DIR / source.name
+
+                if destination.exists() and source.resolve() != destination.resolve():
+                    destination = SHARED_INPUT_DIR / f"{i + 1:02d}_{source.name}"
+
+                if source.resolve() != destination.resolve():
+                    shutil.copy2(source, destination)
+
+                image_paths.append(str(destination))
+        except OSError as exc:
+            self.output_box.setText(
+                f"No se pudieron copiar las imagenes a la carpeta compartida.\n{exc}"
+            )
+            return
+
+        selected_flags = []
+        if self.cb_vg.isChecked(): selected_flags.append("--vg")
+        if self.cb_vc.isChecked(): selected_flags.append("--vc")
+        if self.cb_hg.isChecked(): selected_flags.append("--hg")
+        if self.cb_hc.isChecked(): selected_flags.append("--hc")
+        if self.cb_bg.isChecked(): selected_flags.append("--bg")
+        if self.cb_bc.isChecked(): selected_flags.append("--bc")
+
+        common_args = [
+            self.thread_selector.currentText(),
+            str(SHARED_OUTPUT_DIR),
+        ]
+        common_args.extend(image_paths)
+        common_args.extend(selected_flags)
+
+        if MPI_HOSTS:
+            if len(MPI_HOSTS) < MPI_PROCESS_COUNT:
+                self.output_box.setText(
+                    f"MPI_HOSTS debe tener al menos {MPI_PROCESS_COUNT} computadoras."
+                )
+                return
+            if MPI_PROCESS_COUNT != 2:
+                self.output_box.setText(
+                    "La configuracion Windows + Mac actual esta preparada para 2 procesos: maestra y una esclava."
+                )
+                return
+
+            mac_executable = f"{MAC_PROJECT_DIR}/{MAC_EXECUTABLE_NAME}"
+            cmd = [
+                "mpiexec",
+                "-host",
+                MPI_HOSTS[0],
+                "-n",
+                "1",
+                str(local_executable),
+            ]
+            cmd.extend(common_args)
+            cmd.extend([
+                ":",
+                "-host",
+                MPI_HOSTS[1],
+                "-n",
+                "1",
+                mac_executable,
+            ])
+            cmd.extend(common_args)
+        else:
+            cmd = [
+                "mpiexec",
+                "-n",
+                str(MPI_PROCESS_COUNT),
+                str(local_executable),
+            ]
+            cmd.extend(common_args)
 
         self.output_box.setText("Procesando...\n")
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(SHARED_ROOT),
+            )
+        except FileNotFoundError:
+            self.output_box.setText(
+                "No se encontró mpiexec.\n"
+                "Instala MPI o agrega mpiexec al PATH para ejecutar para_image_mpi.exe."
+            )
+            return
+
         output = result.stdout
 
         if result.stderr:

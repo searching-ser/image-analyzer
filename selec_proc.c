@@ -12,6 +12,8 @@ typedef struct {
     unsigned char *data;
 } BmpImage;
 
+static char g_output_dir[400] = "./img/";
+
 static int read_le_int(const unsigned char *bytes)
 {
     return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
@@ -90,9 +92,10 @@ static int load_bmp(const char *path, BmpImage *bmp)
 static int save_bmp(const char *mask, const BmpImage *bmp)
 {
     FILE *outputImage;
-    char add_char[80] = "./img/";
+    char add_char[520];
     int data_size = bmp->row_padded * bmp->height;
 
+    strcpy(add_char, g_output_dir);
     strcat(add_char, mask);
     strcat(add_char, ".bmp");
 
@@ -108,6 +111,24 @@ static int save_bmp(const char *mask, const BmpImage *bmp)
 
     printf("%s\n", add_char);
     return 1;
+}
+
+extern void set_output_directory(const char *dir)
+{
+    size_t len;
+
+    if (dir == NULL || dir[0] == '\0') {
+        strcpy(g_output_dir, "./img/");
+        return;
+    }
+
+    strncpy(g_output_dir, dir, sizeof(g_output_dir) - 2);
+    g_output_dir[sizeof(g_output_dir) - 2] = '\0';
+    len = strlen(g_output_dir);
+    if (len > 0 && g_output_dir[len - 1] != '/' && g_output_dir[len - 1] != '\\') {
+        g_output_dir[len] = '/';
+        g_output_dir[len + 1] = '\0';
+    }
 }
 
 static void free_bmp(BmpImage *bmp)

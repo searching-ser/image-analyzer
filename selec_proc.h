@@ -11,5 +11,6 @@ extern void inv_img_color_vertical(char mask[], char path[]);
 extern void desenfoque(char path[], char mask[], int kernel);
 extern void desenfoque_grey(char path[], char mask[], int kernel);
 extern void desenfoque_color(char path[], char mask[], int kernel);
+extern void set_output_directory(const char *dir);
 
 #endif
