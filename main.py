@@ -13,20 +13,16 @@ from PySide6.QtCore import Qt
 SHARED_ROOT = Path("/mnt/mirror")
 SHARED_INPUT_DIR = SHARED_ROOT / "input"
 SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
-MPI_LAUNCHER = "mpirun"
+MPI_LAUNCHER = "mpiexec.mpich"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
-MPI_HOSTS = ["localhost", "searchingser"]
+MPI_HOSTS = ["localhost", "searching_ser@searchingser"]
 MPI_HOST_EXECUTABLES = {
     "localhost": "/home/vboxuser/image-analyzer/para_image_mpi",
-    "searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
+    "searching_ser@searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
 }
 MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
-    "--oversubscribe",
-    "--mca", "pml", "ob1",
-    "--mca", "btl", "self,tcp",
-    "--mca", "mtl", "^psm2,ofi",
-    "--mca", "plm_rsh_agent", "ssh -l searching_ser",
+    "-launcher", "ssh",
 ]
 
 
