@@ -133,6 +133,8 @@ int main(int argc, char *argv[])
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    printf("[rank %d/%d] iniciado con argc=%d\n", rank, world_size, argc);
 
     if (world_size < 2) {
         if (rank == 0) {
@@ -156,6 +158,7 @@ int main(int argc, char *argv[])
         strncpy(output_dir, argv[2], MAX_PATH_LEN - 1);
         output_dir[MAX_PATH_LEN - 1] = '\0';
         parse_flags(argc, argv, &flags);
+        printf("[rank 0] threads=%d output=%s\n", num_threads, output_dir);
 
         for (i = 3; i < argc; i++) {
             if (argv[i][0] == '-') {
@@ -171,6 +174,7 @@ int main(int argc, char *argv[])
             printf("No se recibieron imagenes para procesar.\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
+        printf("[rank 0] imagenes recibidas=%d\n", image_count);
 
         flags_array[0] = flags.do_vg;
         flags_array[1] = flags.do_vc;
@@ -240,11 +244,14 @@ int main(int argc, char *argv[])
                 strcpy(worker_images[i], image_paths[start + i]);
             }
 
+            printf("[rank 0] enviando %d imagen(es) a rank %d\n", count, worker_rank);
             send_images_to_worker(worker_rank, worker_images, count);
         }
 
         for (worker_rank = 1; worker_rank < world_size; worker_rank++) {
+            printf("[rank 0] esperando fin de rank %d\n", worker_rank);
             MPI_Recv(&done_rank, 1, MPI_INT, worker_rank, 200, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            printf("[rank 0] rank %d terminado\n", done_rank);
         }
     } else {
         int my_count = 0;
@@ -254,8 +261,10 @@ int main(int argc, char *argv[])
         int i;
 
         MPI_Recv(&my_count, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        printf("[rank %d] recibi count=%d\n", rank, my_count);
         if (my_count > 0) {
             MPI_Recv(my_images, my_count * MAX_PATH_LEN, MPI_CHAR, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            printf("[rank %d] recibi rutas de imagenes\n", rank);
         }
 
         omp_set_num_threads(num_threads);
@@ -266,10 +275,13 @@ int main(int argc, char *argv[])
         for (i = 0; i < my_count; i++) {
             char local_image[MAX_PATH_LEN];
             normalize_shared_path(my_images[i], local_image, sizeof(local_image));
+            printf("[rank %d] procesando %s\n", rank, local_image);
             process_image(local_image, &flags, kernel);
+            printf("[rank %d] termino %s\n", rank, local_image);
         }
 
         done_rank = rank;
+        printf("[rank %d] enviando fin\n", rank);
         MPI_Send(&done_rank, 1, MPI_INT, 0, 200, MPI_COMM_WORLD);
     }
 

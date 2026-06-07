@@ -321,14 +321,17 @@ class App(QWidget):
             self.output_box.setText("Configura MPI_HOSTS con la maestra y las esclavas Ubuntu.")
             return
 
-        cmd = [MPI_LAUNCHER, *MPI_EXTRA_ARGS]
+        cmd = [
+            MPI_LAUNCHER,
+            *MPI_EXTRA_ARGS,
+            "-hosts",
+            ",".join(MPI_HOSTS),
+        ]
         for index, host in enumerate(MPI_HOSTS):
             executable = MPI_HOST_EXECUTABLES.get(host, str(local_executable))
             if index > 0:
                 cmd.append(":")
             cmd.extend([
-                "-host",
-                host,
                 "-n",
                 "1",
                 executable,
