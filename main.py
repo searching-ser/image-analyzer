@@ -16,9 +16,16 @@ SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
 MPI_LAUNCHER = "mpirun"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
 MPI_HOSTS = ["localhost", "searchingser"]
+MPI_HOST_EXECUTABLES = {
+    "localhost": "/home/vboxuser/image-analyzer/para_image_mpi",
+    "searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
+}
 MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
     "--oversubscribe",
+    "--mca", "pml", "ob1",
+    "--mca", "btl", "self,tcp",
+    "--mca", "mtl", "^psm2,ofi",
     "--mca", "plm_rsh_agent", "ssh -l searching_ser",
 ]
 
@@ -318,16 +325,19 @@ class App(QWidget):
             self.output_box.setText("Configura MPI_HOSTS con la maestra y las esclavas Ubuntu.")
             return
 
-        cmd = [
-            MPI_LAUNCHER,
-            *MPI_EXTRA_ARGS,
-            "-host",
-            ",".join(MPI_HOSTS),
-            "-n",
-            str(MPI_PROCESS_COUNT),
-            str(local_executable),
-        ]
-        cmd.extend(common_args)
+        cmd = [MPI_LAUNCHER, *MPI_EXTRA_ARGS]
+        for index, host in enumerate(MPI_HOSTS):
+            executable = MPI_HOST_EXECUTABLES.get(host, str(local_executable))
+            if index > 0:
+                cmd.append(":")
+            cmd.extend([
+                "-host",
+                host,
+                "-n",
+                "1",
+                executable,
+            ])
+            cmd.extend(common_args)
 
         self.output_box.setText("Procesando...\n")
 

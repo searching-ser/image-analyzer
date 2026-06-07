@@ -38,7 +38,19 @@ static int load_bmp(const char *path, BmpImage *bmp)
         return 0;
     }
 
+    if (file_header[0] != 'B' || file_header[1] != 'M') {
+        fclose(image);
+        printf("Error: %s no es un archivo BMP valido\n", path);
+        return 0;
+    }
+
     data_offset = read_le_int(&file_header[10]);
+    if (data_offset < 54) {
+        fclose(image);
+        printf("Error: Cabecera BMP invalida en %s\n", path);
+        return 0;
+    }
+
     bmp->header_size = data_offset;
     bmp->header = (unsigned char *)malloc((size_t)bmp->header_size);
     if (bmp->header == NULL) {
@@ -60,6 +72,20 @@ static int load_bmp(const char *path, BmpImage *bmp)
 
     bmp->width = read_le_int(&bmp->header[18]);
     bmp->height = read_le_int(&bmp->header[22]);
+    if (bmp->header[28] != 24 || bmp->header[29] != 0) {
+        free(bmp->header);
+        bmp->header = NULL;
+        fclose(image);
+        printf("Error: %s debe ser BMP de 24 bits\n", path);
+        return 0;
+    }
+    if (bmp->width <= 0 || bmp->height == 0) {
+        free(bmp->header);
+        bmp->header = NULL;
+        fclose(image);
+        printf("Error: Dimensiones BMP invalidas en %s\n", path);
+        return 0;
+    }
     if (bmp->height < 0) {
         bmp->height = -bmp->height;
     }
