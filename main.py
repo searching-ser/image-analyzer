@@ -15,6 +15,7 @@ SHARED_INPUT_DIR = SHARED_ROOT / "input"
 SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
 MPI_LAUNCHER = "mpiexec.mpich"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
+MPI_MASTER_HOST = "UbuntuRedes"
 MPI_HOSTS = ["localhost", "searching_ser@searchingser"]
 MPI_HOST_EXECUTABLES = {
     "localhost": "/home/vboxuser/image-analyzer/para_image_mpi",
@@ -23,6 +24,7 @@ MPI_HOST_EXECUTABLES = {
 MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
     "-launcher", "ssh",
+    "-localhost", MPI_MASTER_HOST,
 ]
 
 
