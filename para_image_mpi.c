@@ -8,8 +8,6 @@
 #define MAX_IMAGES 10
 #define MAX_PATH_LEN 260
 #define MAX_MASK_LEN 160
-#define WINDOWS_SHARED_ROOT "\\\\emisan-pc\\ImagAnShared"
-#define MAC_SHARED_ROOT "/Users/ser/Universidad/ImagAnShared"
 
 typedef struct {
     int do_vg;
@@ -44,34 +42,8 @@ static void get_base_name(const char *path, char *output, size_t size)
 
 static void normalize_shared_path(const char *input, char *output, size_t size)
 {
-#ifdef _WIN32
     strncpy(output, input, size - 1);
     output[size - 1] = '\0';
-#else
-    size_t windows_len = strlen(WINDOWS_SHARED_ROOT);
-    size_t mac_len = strlen(MAC_SHARED_ROOT);
-    size_t i;
-    size_t j;
-
-    if (strncmp(input, WINDOWS_SHARED_ROOT, windows_len) != 0) {
-        strncpy(output, input, size - 1);
-        output[size - 1] = '\0';
-        return;
-    }
-
-    if (mac_len >= size) {
-        output[0] = '\0';
-        return;
-    }
-
-    strcpy(output, MAC_SHARED_ROOT);
-    j = mac_len;
-
-    for (i = windows_len; input[i] != '\0' && j < size - 1; i++) {
-        output[j++] = (input[i] == '\\') ? '/' : input[i];
-    }
-    output[j] = '\0';
-#endif
 }
 
 static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
@@ -164,7 +136,7 @@ int main(int argc, char *argv[])
 
     if (world_size < 2) {
         if (rank == 0) {
-            printf("Uso: mpiexec -n 2 para_image_mpi.exe <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n 3 para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
             printf("Se requieren al menos 2 procesos MPI: 1 maestra y 1 o mas esclavas.\n");
         }
         MPI_Finalize();
@@ -176,7 +148,7 @@ int main(int argc, char *argv[])
         int i;
 
         if (argc < 4) {
-            printf("Uso: mpiexec -n 2 para_image_mpi.exe <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n 3 para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 

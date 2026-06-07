@@ -10,15 +10,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 
-SHARED_ROOT = Path(r"\\emisan-pc\ImagAnShared")
+SHARED_ROOT = Path("/mnt/mirror")
 SHARED_INPUT_DIR = SHARED_ROOT / "input"
 SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
-MPI_EXECUTABLE_NAME = "para_image_mpi.exe"
-MAC_SHARED_ROOT = "/Users/ser/Universidad/ImagAnShared"
-MAC_PROJECT_DIR = "/Users/ser/Universidad/SisDis"
-MAC_EXECUTABLE_NAME = "para_image_mpi_mac"
-MPI_PROCESS_COUNT = 2
-MPI_HOSTS = ["emisan-pc", "sergios-macbook-air"]  # Cambia slave1-pc por el nombre Tailscale de tu esclava
+MPI_LAUNCHER = "mpirun"
+MPI_EXECUTABLE_NAME = "para_image_mpi"
+MPI_HOSTS = ["localhost", "searchingser"]
+MPI_PROCESS_COUNT = len(MPI_HOSTS)
+MPI_EXTRA_ARGS = [
+    "--oversubscribe",
+    "--mca", "plm_rsh_agent", "ssh -l searching_ser",
+]
 
 
 class DropListWidget(QListWidget):
@@ -312,45 +314,20 @@ class App(QWidget):
         common_args.extend(image_paths)
         common_args.extend(selected_flags)
 
-        if MPI_HOSTS:
-            if len(MPI_HOSTS) < MPI_PROCESS_COUNT:
-                self.output_box.setText(
-                    f"MPI_HOSTS debe tener al menos {MPI_PROCESS_COUNT} computadoras."
-                )
-                return
-            if MPI_PROCESS_COUNT != 2:
-                self.output_box.setText(
-                    "La configuracion Windows + Mac actual esta preparada para 2 procesos: maestra y una esclava."
-                )
-                return
+        if not MPI_HOSTS:
+            self.output_box.setText("Configura MPI_HOSTS con la maestra y las esclavas Ubuntu.")
+            return
 
-            mac_executable = f"{MAC_PROJECT_DIR}/{MAC_EXECUTABLE_NAME}"
-            cmd = [
-                "mpiexec",
-                "-host",
-                MPI_HOSTS[0],
-                "-n",
-                "1",
-                str(local_executable),
-            ]
-            cmd.extend(common_args)
-            cmd.extend([
-                ":",
-                "-host",
-                MPI_HOSTS[1],
-                "-n",
-                "1",
-                mac_executable,
-            ])
-            cmd.extend(common_args)
-        else:
-            cmd = [
-                "mpiexec",
-                "-n",
-                str(MPI_PROCESS_COUNT),
-                str(local_executable),
-            ]
-            cmd.extend(common_args)
+        cmd = [
+            MPI_LAUNCHER,
+            *MPI_EXTRA_ARGS,
+            "-host",
+            ",".join(MPI_HOSTS),
+            "-n",
+            str(MPI_PROCESS_COUNT),
+            str(local_executable),
+        ]
+        cmd.extend(common_args)
 
         self.output_box.setText("Procesando...\n")
 
@@ -364,7 +341,7 @@ class App(QWidget):
         except FileNotFoundError:
             self.output_box.setText(
                 "No se encontró mpiexec.\n"
-                "Instala MPI o agrega mpiexec al PATH para ejecutar para_image_mpi.exe."
+                "Instala OpenMPI o agrega mpirun al PATH para ejecutar para_image_mpi."
             )
             return
 
