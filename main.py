@@ -15,16 +15,18 @@ SHARED_INPUT_DIR = SHARED_ROOT / "input"
 SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
 MPI_LAUNCHER = "mpiexec.mpich"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
-MPI_MASTER_HOST = "UbuntuRedes"
-MPI_HOSTS = ["localhost", "searching_ser@searchingser"]
+MPI_MASTER_HOST = "ubuntu-master"
+MPI_MACHINEFILE = str(Path(__file__).resolve().parent / "machinefile")
+MPI_HOSTS = ["ubuntu-master", "searching_ser@searchingser"]
 MPI_HOST_EXECUTABLES = {
-    "localhost": "/home/vboxuser/image-analyzer/para_image_mpi",
+    "ubuntu-master": "/home/vboxuser/image-analyzer/para_image_mpi",
     "searching_ser@searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
 }
 MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
     "-launcher", "ssh",
     "-localhost", MPI_MASTER_HOST,
+    "-f", MPI_MACHINEFILE,
 ]
 
 
@@ -326,8 +328,6 @@ class App(QWidget):
         cmd = [
             MPI_LAUNCHER,
             *MPI_EXTRA_ARGS,
-            "-hosts",
-            ",".join(MPI_HOSTS),
         ]
         for index, host in enumerate(MPI_HOSTS):
             executable = MPI_HOST_EXECUTABLES.get(host, str(local_executable))
