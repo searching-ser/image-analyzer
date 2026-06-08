@@ -1,6 +1,8 @@
 import sys
+import os
 import subprocess
 import shutil
+import shlex
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
@@ -34,7 +36,13 @@ MPI_EXTRA_ARGS = [
     "-genv", "FI_TCP_IFACE", "tailscale0",
     "-localhost", MPI_MASTER_HOST,
     "-f", MPI_MACHINEFILE,
+    "-prepend-rank",
 ]
+MPI_ENV = {
+    "FI_PROVIDER": "tcp",
+    "FI_TCP_IFACE": "tailscale0",
+    "LD_LIBRARY_PATH": "/opt/mpich-4.2.0/lib",
+}
 
 
 class DropListWidget(QListWidget):
@@ -349,7 +357,11 @@ class App(QWidget):
             ])
             cmd.extend(common_args)
 
-        self.output_box.setText("Procesando...\n")
+        printable_cmd = " ".join(shlex.quote(part) for part in cmd)
+        self.output_box.setText(f"Procesando...\n\nComando MPI:\n{printable_cmd}\n")
+
+        env = os.environ.copy()
+        env.update(MPI_ENV)
 
         try:
             result = subprocess.run(
@@ -357,15 +369,17 @@ class App(QWidget):
                 capture_output=True,
                 text=True,
                 cwd=str(SHARED_ROOT),
+                env=env,
             )
         except FileNotFoundError:
             self.output_box.setText(
                 "No se encontró mpiexec.\n"
-                "Instala OpenMPI o agrega mpirun al PATH para ejecutar para_image_mpi."
+                "Instala MPICH 4.2.0 o revisa la ruta de MPI_LAUNCHER."
             )
             return
 
-        output = result.stdout
+        output = f"Comando MPI:\n{printable_cmd}\n\n"
+        output += result.stdout
 
         if result.stderr:
             output += "\n" + result.stderr
