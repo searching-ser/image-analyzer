@@ -35,7 +35,16 @@ from PySide6.QtWidgets import (
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-LOCAL_ONLY_TESTING = True
+
+
+def env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on", "local"}
+
+
+LOCAL_ONLY_TESTING = env_flag("IMAGE_ANALYZER_LOCAL_ONLY", False)
 LOCAL_MPIEXEC = os.environ.get("IMAGE_ANALYZER_MPIEXEC", "mpiexec")
 
 SHARED_ROOT = PROJECT_DIR / "local_mirror" if LOCAL_ONLY_TESTING else Path("/mnt/mirror")
@@ -71,7 +80,7 @@ MPI_ENV = {} if LOCAL_ONLY_TESTING else {
 }
 
 MAX_UI_IMAGES = 600
-MAX_BACKEND_IMAGES = 10
+MAX_BACKEND_IMAGES = 10 if LOCAL_ONLY_TESTING else MAX_UI_IMAGES
 PROCESS_OPTIONS = [
     ("Escala de grises", (), "placeholder"),
     ("Espejo horizontal color", ("--hc",), "functional"),
@@ -948,4 +957,3 @@ if __name__ == "__main__":
     window = App()
     window.show()
     sys.exit(app.exec())
-
