@@ -110,14 +110,6 @@ static void process_image(const char *path, const ProcessFlags *flags, int kerne
     }
 }
 
-static void send_images_to_worker(int worker_rank, char images[][MAX_PATH_LEN], int count)
-{
-    MPI_Send(&count, 1, MPI_INT, worker_rank, 100, MPI_COMM_WORLD);
-    if (count > 0) {
-        MPI_Send(images, count * MAX_PATH_LEN, MPI_CHAR, worker_rank, 101, MPI_COMM_WORLD);
-    }
-}
-
 int main(int argc, char *argv[])
 {
     int rank;
@@ -125,10 +117,16 @@ int main(int argc, char *argv[])
     int num_threads = 0;
     int kernel = 27;
     char output_dir[MAX_PATH_LEN] = {0};
+    char image_paths[MAX_IMAGES][MAX_PATH_LEN];
+    int image_count = 0;
     ProcessFlags flags;
     int flags_array[6];
     double t_start;
     double t_end;
+    int start_index;
+    int end_index;
+    int my_count;
+    int i;
 
     setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "[pre-mpi] proceso iniciado argc=%d\n", argc);
@@ -143,21 +141,9 @@ int main(int argc, char *argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
     fprintf(stderr, "[rank %d/%d] MPI_Init terminado argc=%d\n", rank, world_size, argc);
 
-    if (world_size < 2) {
-        if (rank == 0) {
-            printf("Uso: mpirun -n 3 para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
-            printf("Se requieren al menos 2 procesos MPI: 1 maestra y 1 o mas esclavas.\n");
-        }
-        MPI_Finalize();
-        return 1;
-    }
-
     if (rank == 0) {
-        int image_count = 0;
-        int i;
-
         if (argc < 4) {
-            printf("Uso: mpirun -n 3 para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
@@ -174,6 +160,8 @@ int main(int argc, char *argv[])
             if (image_count >= MAX_IMAGES) {
                 break;
             }
+            strncpy(image_paths[image_count], argv[i], MAX_PATH_LEN - 1);
+            image_paths[image_count][MAX_PATH_LEN - 1] = '\0';
             image_count++;
         }
 
@@ -196,6 +184,8 @@ int main(int argc, char *argv[])
     MPI_Bcast(&num_threads, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&kernel, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(output_dir, MAX_PATH_LEN, MPI_CHAR, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&image_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(image_paths, MAX_IMAGES * MAX_PATH_LEN, MPI_CHAR, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         flags_array[0] = flags.do_vg;
@@ -217,88 +207,38 @@ int main(int argc, char *argv[])
 
     t_start = MPI_Wtime();
 
-    if (rank == 0) {
-        int image_count = 0;
-        int i;
-        char image_paths[MAX_IMAGES][MAX_PATH_LEN];
-        int done_rank;
-        int worker_count = world_size - 1;
-        int worker_rank;
-        int start;
-        int end;
-        int count;
+    start_index = (rank * image_count) / world_size;
+    end_index = ((rank + 1) * image_count) / world_size;
+    my_count = end_index - start_index;
 
-        for (i = 3; i < argc; i++) {
-            if (argv[i][0] == '-') {
-                continue;
-            }
-            if (image_count >= MAX_IMAGES) {
-                break;
-            }
-            strncpy(image_paths[image_count], argv[i], MAX_PATH_LEN - 1);
-            image_paths[image_count][MAX_PATH_LEN - 1] = '\0';
-            image_count++;
-        }
-
-        for (worker_rank = 1; worker_rank < world_size; worker_rank++) {
-            char worker_images[MAX_IMAGES][MAX_PATH_LEN];
-
-            start = ((worker_rank - 1) * image_count) / worker_count;
-            end = (worker_rank * image_count) / worker_count;
-            count = end - start;
-
-            for (i = 0; i < count; i++) {
-                strcpy(worker_images[i], image_paths[start + i]);
-            }
-
-            printf("[rank 0] enviando %d imagen(es) a rank %d\n", count, worker_rank);
-            send_images_to_worker(worker_rank, worker_images, count);
-        }
-
-        for (worker_rank = 1; worker_rank < world_size; worker_rank++) {
-            printf("[rank 0] esperando fin de rank %d\n", worker_rank);
-            MPI_Recv(&done_rank, 1, MPI_INT, worker_rank, 200, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("[rank 0] rank %d terminado\n", done_rank);
-        }
-    } else {
-        int my_count = 0;
-        char my_images[MAX_IMAGES][MAX_PATH_LEN];
+    {
         char local_output_dir[MAX_PATH_LEN];
-        int done_rank;
-        int i;
-
-        MPI_Recv(&my_count, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        printf("[rank %d] recibi count=%d\n", rank, my_count);
-        if (my_count > 0) {
-            MPI_Recv(my_images, my_count * MAX_PATH_LEN, MPI_CHAR, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("[rank %d] recibi rutas de imagenes\n", rank);
-        }
 
         omp_set_num_threads(num_threads);
         normalize_shared_path(output_dir, local_output_dir, sizeof(local_output_dir));
         set_output_directory(local_output_dir);
-
-        #pragma omp parallel for schedule(dynamic)
-        for (i = 0; i < my_count; i++) {
-            char local_image[MAX_PATH_LEN];
-            normalize_shared_path(my_images[i], local_image, sizeof(local_image));
-            printf("[rank %d] procesando %s\n", rank, local_image);
-            process_image(local_image, &flags, kernel);
-            printf("[rank %d] termino %s\n", rank, local_image);
-        }
-
-        done_rank = rank;
-        printf("[rank %d] enviando fin\n", rank);
-        MPI_Send(&done_rank, 1, MPI_INT, 0, 200, MPI_COMM_WORLD);
     }
 
+    printf("[rank %d/%d] procesara %d imagen(es): indices %d..%d\n",
+           rank, world_size, my_count, start_index, end_index - 1);
+
+    #pragma omp parallel for schedule(dynamic)
+    for (i = start_index; i < end_index; i++) {
+        char local_image[MAX_PATH_LEN];
+        normalize_shared_path(image_paths[i], local_image, sizeof(local_image));
+        printf("[rank %d] procesando %s\n", rank, local_image);
+        process_image(local_image, &flags, kernel);
+        printf("[rank %d] termino %s\n", rank, local_image);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
     t_end = MPI_Wtime();
 
     if (rank == 0) {
         printf("Procesamiento distribuido terminado.\n");
-        printf("Threads locales por esclava: %d\n", num_threads);
+        printf("Threads locales por proceso: %d\n", num_threads);
         printf("Tiempo total MPI: %.6f segundos\n", t_end - t_start);
-        printf("Esclavas utilizadas: %d\n", world_size - 1);
+        printf("Procesos MPI utilizados: %d\n", world_size);
     }
 
     MPI_Finalize();

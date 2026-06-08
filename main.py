@@ -19,12 +19,12 @@ MPI_LAUNCHER = "/opt/mpich-4.2.0/bin/mpiexec"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
 MPI_MASTER_HOST = "ubuntu-master"
 MPI_MACHINEFILE = str(Path(__file__).resolve().parent / "machinefile")
-MPI_HOSTS = ["ubuntu-master", "searching_ser@searchingser"]
+MPI_HOSTS = ["ubuntu-master", "searching_ser@searchingser", "diego@diegovm"]
 MPI_HOST_EXECUTABLES = {
     "ubuntu-master": "/home/vboxuser/image-analyzer/para_image_mpi",
     "searching_ser@searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
+    "diego@diegovm": "/home/diego/image-analyzer/para_image_mpi",
 }
-MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
     "-launcher", "ssh",
     "-disable-x",
@@ -43,6 +43,40 @@ MPI_ENV = {
     "FI_TCP_IFACE": "tailscale0",
     "LD_LIBRARY_PATH": "/opt/mpich-4.2.0/lib",
 }
+
+
+def parse_machinefile_hosts(machinefile_path):
+    hosts = []
+
+    try:
+        with open(machinefile_path, "r", encoding="utf-8") as machinefile:
+            for line in machinefile:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                host = line.split()[0]
+                if ":" in host:
+                    name, slots = host.rsplit(":", 1)
+                    if slots.isdigit():
+                        host = name
+
+                hosts.append(host)
+    except OSError:
+        return list(MPI_HOSTS)
+
+    return hosts if hosts else list(MPI_HOSTS)
+
+
+def executable_for_host(host, local_executable):
+    if host in MPI_HOST_EXECUTABLES:
+        return MPI_HOST_EXECUTABLES[host]
+
+    if "@" in host:
+        user = host.split("@", 1)[0]
+        return f"/home/{user}/image-analyzer/{MPI_EXECUTABLE_NAME}"
+
+    return str(local_executable)
 
 
 class DropListWidget(QListWidget):
@@ -336,16 +370,18 @@ class App(QWidget):
         common_args.extend(image_paths)
         common_args.extend(selected_flags)
 
-        if not MPI_HOSTS:
-            self.output_box.setText("Configura MPI_HOSTS con la maestra y las esclavas Ubuntu.")
+        mpi_hosts = parse_machinefile_hosts(MPI_MACHINEFILE)
+
+        if not mpi_hosts:
+            self.output_box.setText("Configura el machinefile con la maestra y las esclavas Ubuntu.")
             return
 
         cmd = [
             MPI_LAUNCHER,
             *MPI_EXTRA_ARGS,
         ]
-        for index, host in enumerate(MPI_HOSTS):
-            executable = MPI_HOST_EXECUTABLES.get(host, str(local_executable))
+        for index, host in enumerate(mpi_hosts):
+            executable = executable_for_host(host, local_executable)
             if index > 0:
                 cmd.append(":")
             cmd.extend([

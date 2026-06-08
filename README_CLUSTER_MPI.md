@@ -368,6 +368,10 @@ Para agregar mas esclavas, agrega una linea por esclava:
 usuario@nombre-tailscale:1
 ```
 
+La GUI de `main.py` lee este archivo para decidir cuantas maquinas usar. El programa lanza un proceso MPI por cada linea del `machinefile`.
+
+El binario `para_image_mpi` reparte las imagenes entre todos los procesos MPI disponibles, incluyendo rank 0. Es decir, la maestra ya no solo asigna tareas: tambien procesa su parte de las imagenes.
+
 ## 10. [MAESTRA] Probar MPI basico
 
 Desde la maestra:
