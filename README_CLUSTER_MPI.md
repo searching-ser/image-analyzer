@@ -487,6 +487,31 @@ Debe aparecer:
 test_vg.bmp
 ```
 
+Tambien puedes pasar una carpeta completa en lugar de escribir imagen por imagen. El binario tomara los archivos `.bmp` directos dentro de esa carpeta:
+
+```bash
+FI_PROVIDER=tcp \
+FI_TCP_IFACE=tailscale0 \
+/opt/mpich-4.2.0/bin/mpiexec \
+  -launcher ssh \
+  -disable-x \
+  -genv FI_PROVIDER tcp \
+  -genv FI_TCP_IFACE tailscale0 \
+  -genv LD_LIBRARY_PATH /opt/mpich-4.2.0/lib \
+  -localhost ubuntu-master \
+  -f /home/vboxuser/image-analyzer/machinefile \
+  -wdir /mnt/mirror \
+  -prepend-rank \
+  -n 1 /home/vboxuser/image-analyzer/para_image_mpi \
+  12 /mnt/mirror/output /mnt/mirror/input --vg \
+  : \
+  -wdir /mnt/mirror \
+  -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
+  12 /mnt/mirror/output /mnt/mirror/input --vg
+```
+
+La busqueda no es recursiva: procesa los `.bmp` que esten directamente dentro de la carpeta indicada.
+
 ## 14. [MAESTRA] Probar desde la GUI
 
 En la maestra:

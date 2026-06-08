@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <omp.h>
 #include <mpi.h>
 #include "selec_proc.h"
 
-#define MAX_IMAGES 10
+#define MAX_IMAGES 1000
 #define MAX_PATH_LEN 260
 #define MAX_MASK_LEN 160
 
@@ -44,6 +46,95 @@ static void normalize_shared_path(const char *input, char *output, size_t size)
 {
     strncpy(output, input, size - 1);
     output[size - 1] = '\0';
+}
+
+static int has_bmp_extension(const char *path)
+{
+    const char *dot = strrchr(path, '.');
+
+    if (dot == NULL) {
+        return 0;
+    }
+
+    return strcmp(dot, ".bmp") == 0 || strcmp(dot, ".BMP") == 0 ||
+           strcmp(dot, ".Bmp") == 0 || strcmp(dot, ".bMp") == 0 ||
+           strcmp(dot, ".bmP") == 0 || strcmp(dot, ".BMp") == 0 ||
+           strcmp(dot, ".bMP") == 0 || strcmp(dot, ".BmP") == 0;
+}
+
+static int compare_paths(const void *left, const void *right)
+{
+    const char *a = (const char *)left;
+    const char *b = (const char *)right;
+
+    return strcmp(a, b);
+}
+
+static void add_image_path(char images[][MAX_PATH_LEN], int *image_count, const char *path)
+{
+    if (*image_count >= MAX_IMAGES) {
+        printf("Aviso: se alcanzo el limite de %d imagenes. Se ignorara %s\n", MAX_IMAGES, path);
+        return;
+    }
+
+    strncpy(images[*image_count], path, MAX_PATH_LEN - 1);
+    images[*image_count][MAX_PATH_LEN - 1] = '\0';
+    (*image_count)++;
+}
+
+static void add_images_from_directory(char images[][MAX_PATH_LEN], int *image_count, const char *dir_path)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[MAX_PATH_LEN];
+
+    dir = opendir(dir_path);
+    if (dir == NULL) {
+        printf("Error: No se pudo abrir carpeta %s\n", dir_path);
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        if (!has_bmp_extension(entry->d_name)) {
+            continue;
+        }
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        add_image_path(images, image_count, full_path);
+    }
+
+    closedir(dir);
+}
+
+static void collect_image_paths(int argc, char *argv[], char images[][MAX_PATH_LEN], int *image_count)
+{
+    int i;
+
+    *image_count = 0;
+
+    for (i = 3; i < argc; i++) {
+        struct stat path_stat;
+
+        if (argv[i][0] == '-') {
+            continue;
+        }
+
+        if (stat(argv[i], &path_stat) != 0) {
+            printf("Aviso: no se encontro %s\n", argv[i]);
+            continue;
+        }
+
+        if (S_ISDIR(path_stat.st_mode)) {
+            add_images_from_directory(images, image_count, argv[i]);
+        } else if (S_ISREG(path_stat.st_mode)) {
+            add_image_path(images, image_count, argv[i]);
+        }
+    }
+
+    qsort(images, (size_t)(*image_count), MAX_PATH_LEN, compare_paths);
 }
 
 static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
@@ -143,7 +234,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0) {
         if (argc < 4) {
-            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img1> [img2 ... img10] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img_o_carpeta1> [img_o_carpeta2 ...] [--vg --vc --hg --hc --bg --bc]\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
@@ -153,17 +244,7 @@ int main(int argc, char *argv[])
         parse_flags(argc, argv, &flags);
         printf("[rank 0] threads=%d output=%s\n", num_threads, output_dir);
 
-        for (i = 3; i < argc; i++) {
-            if (argv[i][0] == '-') {
-                continue;
-            }
-            if (image_count >= MAX_IMAGES) {
-                break;
-            }
-            strncpy(image_paths[image_count], argv[i], MAX_PATH_LEN - 1);
-            image_paths[image_count][MAX_PATH_LEN - 1] = '\0';
-            image_count++;
-        }
+        collect_image_paths(argc, argv, image_paths, &image_count);
 
         if (image_count == 0) {
             printf("No se recibieron imagenes para procesar.\n");

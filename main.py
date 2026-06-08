@@ -139,14 +139,11 @@ class DropListWidget(QListWidget):
 
             file_path = url.toLocalFile()
 
-            if not file_path.lower().endswith(".bmp"):
+            if not file_path.lower().endswith(".bmp") and not Path(file_path).is_dir():
                 continue
 
             if file_path in existing:
                 continue
-
-            if self.count() >= 10:
-                break
 
             self.addItem(file_path)
 
@@ -227,10 +224,14 @@ class App(QWidget):
         btn_add = QPushButton("Agregar imágenes")
         btn_add.clicked.connect(self.select_images)
 
+        btn_add_folder = QPushButton("Agregar carpeta")
+        btn_add_folder.clicked.connect(self.select_folder)
+
         btn_clear = QPushButton("Limpiar")
         btn_clear.clicked.connect(self.clear_list)
 
         btn_layout.addWidget(btn_add)
+        btn_layout.addWidget(btn_add_folder)
         btn_layout.addWidget(btn_clear)
 
         layout.addLayout(btn_layout)
@@ -297,10 +298,17 @@ class App(QWidget):
             if f in existing:
                 continue
 
-            if self.list_widget.count() >= 10:
-                break
-
             self.list_widget.addItem(f)
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con imagenes")
+
+        if not folder:
+            return
+
+        existing = [self.list_widget.item(i).text() for i in range(self.list_widget.count())]
+        if folder not in existing:
+            self.list_widget.addItem(folder)
 
     def clear_list(self):
         self.list_widget.clear()
@@ -340,10 +348,29 @@ class App(QWidget):
         try:
             for i in range(self.list_widget.count()):
                 source = Path(self.list_widget.item(i).text())
+
+                if source.is_dir():
+                    for bmp_file in sorted(source.iterdir()):
+                        if not bmp_file.is_file() or bmp_file.suffix.lower() != ".bmp":
+                            continue
+
+                        destination = SHARED_INPUT_DIR / bmp_file.name
+                        if destination.exists() and bmp_file.resolve() != destination.resolve():
+                            destination = SHARED_INPUT_DIR / f"{len(image_paths) + 1:03d}_{bmp_file.name}"
+
+                        if bmp_file.resolve() != destination.resolve():
+                            shutil.copy2(bmp_file, destination)
+
+                        image_paths.append(str(destination))
+                    continue
+
+                if source.suffix.lower() != ".bmp":
+                    continue
+
                 destination = SHARED_INPUT_DIR / source.name
 
                 if destination.exists() and source.resolve() != destination.resolve():
-                    destination = SHARED_INPUT_DIR / f"{i + 1:02d}_{source.name}"
+                    destination = SHARED_INPUT_DIR / f"{len(image_paths) + 1:03d}_{source.name}"
 
                 if source.resolve() != destination.resolve():
                     shutil.copy2(source, destination)
@@ -353,6 +380,10 @@ class App(QWidget):
             self.output_box.setText(
                 f"No se pudieron copiar las imagenes a la carpeta compartida.\n{exc}"
             )
+            return
+
+        if not image_paths:
+            self.output_box.setText("No se encontraron imagenes BMP para procesar.")
             return
 
         selected_flags = []
