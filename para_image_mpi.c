@@ -134,8 +134,12 @@ int main(int argc, char *argv[])
     fprintf(stderr, "[pre-mpi] proceso iniciado argc=%d\n", argc);
 
     MPI_Init(&argc, &argv);
+    fprintf(stderr, "[post-mpi] MPI_Init terminado\n");
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    fprintf(stderr, "[post-mpi] MPI_Comm_rank terminado\n");
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    fprintf(stderr, "[post-mpi] MPI_Comm_size terminado\n");
     setvbuf(stdout, NULL, _IONBF, 0);
     fprintf(stderr, "[rank %d/%d] MPI_Init terminado argc=%d\n", rank, world_size, argc);
 

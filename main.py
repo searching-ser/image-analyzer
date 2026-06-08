@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt
 SHARED_ROOT = Path("/mnt/mirror")
 SHARED_INPUT_DIR = SHARED_ROOT / "input"
 SHARED_OUTPUT_DIR = SHARED_ROOT / "output"
-MPI_LAUNCHER = "mpiexec.mpich"
+MPI_LAUNCHER = "/opt/mpich-4.2.0/bin/mpiexec"
 MPI_EXECUTABLE_NAME = "para_image_mpi"
 MPI_MASTER_HOST = "ubuntu-master"
 MPI_MACHINEFILE = str(Path(__file__).resolve().parent / "machinefile")
@@ -25,6 +25,11 @@ MPI_HOST_EXECUTABLES = {
 MPI_PROCESS_COUNT = len(MPI_HOSTS)
 MPI_EXTRA_ARGS = [
     "-launcher", "ssh",
+    "-disable-x",
+    "-genv", "DISPLAY", "",
+    "-genv", "XAUTHORITY", "",
+    "-genv", "PATH", "/opt/mpich-4.2.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "-genv", "LD_LIBRARY_PATH", "/opt/mpich-4.2.0/lib",
     "-localhost", MPI_MASTER_HOST,
     "-f", MPI_MACHINEFILE,
 ]
@@ -334,6 +339,8 @@ class App(QWidget):
             if index > 0:
                 cmd.append(":")
             cmd.extend([
+                "-wdir",
+                str(SHARED_ROOT),
                 "-n",
                 "1",
                 executable,
