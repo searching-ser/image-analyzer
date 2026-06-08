@@ -394,45 +394,19 @@ Debe imprimir dos hosts, por ejemplo:
 [1] searchingser
 ```
 
-## 11. [MAESTRA] Probar hello_mpi
+## 11. [TODOS] Probar hello_mpi
 
-[MAESTRA] Crea `hello_mpi.c` en la maestra:
+Compila y corre `hello_mpi.c` en la maestra:
 
 ```bash
 cd /home/vboxuser/image-analyzer
 
-cat > hello_mpi.c <<'EOF'
-#include <stdio.h>
-#include <mpi.h>
-
-int main(int argc, char **argv) {
-    int rank, size;
-
-    fprintf(stderr, "before MPI_Init\n");
-    fflush(stderr);
-
-    MPI_Init(&argc, &argv);
-
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    printf("hello rank %d/%d\n", rank, size);
-    fflush(stdout);
-
-    MPI_Finalize();
-    return 0;
-}
-EOF
-
 /opt/mpich-4.2.0/bin/mpicc hello_mpi.c -o hello_mpi
+
+/opt/mpich-4.2.0/bin/mpich -prepend-rank -n 2 ./hello_mpi
 ```
 
-[ESCLAVA] Copia o crea el mismo archivo en la esclava y compila:
 
-```bash
-scp /home/vboxuser/image-analyzer/hello_mpi.c searching_ser@searchingser:/home/searching_ser/image-analyzer/
-ssh searching_ser@searchingser 'cd /home/searching_ser/image-analyzer && /opt/mpich-4.2.0/bin/mpicc hello_mpi.c -o hello_mpi'
-```
 
 [MAESTRA] Prueba distribuida:
 
