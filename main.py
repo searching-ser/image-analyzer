@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QPainter, QPen, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -314,6 +314,7 @@ class RunRequest:
 class ProcessingWorker(QThread):
     finished = Signal(str, int, float)
     failed = Signal(str)
+    log_received = Signal(str)
 
     def __init__(self, request):
         super().__init__()
@@ -352,6 +353,9 @@ class ProcessingWorker(QThread):
 
         image_paths = []
         try:
+            for existing_bmp in SHARED_INPUT_DIR.glob("*.bmp"):
+                existing_bmp.unlink()
+
             for index, source_text in enumerate(self.request.image_paths[:MAX_BACKEND_IMAGES]):
                 source = Path(source_text)
                 destination = SHARED_INPUT_DIR / source.name
@@ -364,7 +368,11 @@ class ProcessingWorker(QThread):
             self.failed.emit(f"No se pudieron copiar las imágenes a la carpeta compartida.\n{exc}")
             return
 
-        common_args = [self.request.thread_count, str(SHARED_OUTPUT_DIR), *image_paths, *self.request.selected_flags]
+        if not image_paths:
+            self.failed.emit("No se encontraron imagenes BMP para procesar.")
+            return
+
+        common_args = [self.request.thread_count, str(SHARED_OUTPUT_DIR), str(SHARED_INPUT_DIR), *self.request.selected_flags]
         mpi_hosts = parse_machinefile_hosts(MPI_MACHINEFILE)
 
         if not mpi_hosts:
@@ -381,21 +389,36 @@ class ProcessingWorker(QThread):
         printable_cmd = " ".join(shlex.quote(part) for part in cmd)
         env = os.environ.copy()
         env.update(MPI_ENV)
+        output_parts = [f"Comando MPI:\n{printable_cmd}\n\n"]
+        self.log_received.emit(output_parts[0])
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(SHARED_ROOT), env=env)
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(SHARED_ROOT),
+                env=env,
+                bufsize=1,
+            )
         except FileNotFoundError:
             self.failed.emit("No se encontró mpiexec.\nInstala MPICH 4.2.0 o revisa la ruta de MPI_LAUNCHER.")
             return
 
-        output = f"Comando MPI:\n{printable_cmd}\n\n{result.stdout}"
-        if result.stderr:
-            output += "\n" + result.stderr
-        if result.returncode != 0:
-            output += f"\nEl proceso terminó con código {result.returncode}."
+        if process.stdout is not None:
+            for line in process.stdout:
+                output_parts.append(line)
+                self.log_received.emit(line)
+
+        returncode = process.wait()
+        if returncode != 0:
+            error_line = f"\nEl proceso termino con codigo {returncode}."
+            output_parts.append(error_line)
+            self.log_received.emit(error_line)
 
         elapsed = (datetime.now() - started).total_seconds()
-        self.finished.emit(output, result.returncode, elapsed)
+        self.finished.emit("".join(output_parts), returncode, elapsed)
 
 
 class App(QMainWindow):
@@ -790,9 +813,15 @@ class App(QMainWindow):
         self.log_box.setText("Procesando carga distribuida...\n")
         request = RunRequest(self.image_paths, self.selected_flags(), self.selected_thread_count())
         self.worker = ProcessingWorker(request)
+        self.worker.log_received.connect(self.handle_log_received)
         self.worker.finished.connect(self.handle_finished)
         self.worker.failed.connect(self.handle_failed)
         self.worker.start()
+
+    def handle_log_received(self, text):
+        self.log_box.moveCursor(QTextCursor.MoveOperation.End)
+        self.log_box.insertPlainText(text)
+        self.log_box.moveCursor(QTextCursor.MoveOperation.End)
 
     def handle_finished(self, output, returncode, elapsed):
         self.last_elapsed = elapsed
