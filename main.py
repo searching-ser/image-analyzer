@@ -30,6 +30,8 @@ MPI_EXTRA_ARGS = [
     "-genv", "XAUTHORITY", "",
     "-genv", "PATH", "/opt/mpich-4.2.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "-genv", "LD_LIBRARY_PATH", "/opt/mpich-4.2.0/lib",
+    "-genv", "FI_PROVIDER", "tcp",
+    "-genv", "FI_TCP_IFACE", "tailscale0",
     "-localhost", MPI_MASTER_HOST,
     "-f", MPI_MACHINEFILE,
 ]
