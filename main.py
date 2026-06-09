@@ -305,6 +305,105 @@ class NodeTable(QFrame):
         outer_layout.addLayout(layout)
 
 
+class NodeStatusTable(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("nodeCard")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.rows = {}
+        self.completed_counts = {}
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(14, 14, 14, 14)
+        outer_layout.setSpacing(12)
+
+        title = QLabel("Resumen por nodo")
+        title.setObjectName("fieldLabel")
+        self.badge = QLabel("Esperando ejecucion")
+        self.badge.setObjectName("badge")
+        outer_layout.addWidget(title)
+        outer_layout.addWidget(self.badge)
+
+        self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(10)
+        self.grid.setVerticalSpacing(12)
+        headers = ["Rank/Nodo", "Estado", "Imagen actual", "Terminadas", "Rendimiento"]
+        for col, text in enumerate(headers):
+            label = QLabel(text)
+            label.setObjectName("tableHeader")
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.grid.addWidget(label, 0, col)
+            self.grid.setColumnStretch(col, 1)
+
+        outer_layout.addLayout(self.grid)
+        self.set_nodes([])
+
+    def clear_rows(self):
+        for labels in self.rows.values():
+            for label in labels:
+                self.grid.removeWidget(label)
+                label.deleteLater()
+        self.rows.clear()
+        self.completed_counts.clear()
+
+    def set_nodes(self, hosts):
+        self.clear_rows()
+        if not hosts:
+            hosts = ["Sin nodos configurados"]
+
+        for rank, host in enumerate(hosts):
+            row = rank + 1
+            values = [f"{rank} / {host}", "Pendiente", "-", "0", "-"]
+            labels = []
+            for col, value in enumerate(values):
+                label = QLabel(value)
+                label.setWordWrap(True)
+                label.setMinimumWidth(0)
+                label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                self.grid.addWidget(label, row, col)
+                labels.append(label)
+            self.rows[rank] = labels
+            self.completed_counts[rank] = 0
+
+        self.badge.setText("Nodos listos")
+
+    def mark_assigned(self, rank, count):
+        if rank not in self.rows:
+            return
+        labels = self.rows[rank]
+        labels[1].setText("Sin imagenes" if count == 0 else "Asignado")
+        labels[2].setText("-")
+
+    def mark_processing(self, rank, image_path):
+        if rank not in self.rows:
+            return
+        labels = self.rows[rank]
+        labels[1].setText("Procesando")
+        labels[2].setText(Path(image_path).name)
+
+    def mark_finished_image(self, rank, image_path):
+        if rank not in self.rows:
+            return
+        self.completed_counts[rank] = self.completed_counts.get(rank, 0) + 1
+        labels = self.rows[rank]
+        labels[1].setText("Activo")
+        labels[2].setText(Path(image_path).name)
+        labels[3].setText(str(self.completed_counts[rank]))
+
+    def mark_complete(self):
+        for labels in self.rows.values():
+            labels[1].setText("Terminado")
+            labels[2].setText("-")
+        total = sum(self.completed_counts.values())
+        self.badge.setText(f"Total terminado: {total} imagenes")
+
+    def set_rate_for_all(self, rate_text):
+        for labels in self.rows.values():
+            labels[4].setText(rate_text)
+
+
 @dataclass
 class RunRequest:
     image_paths: list
@@ -605,7 +704,8 @@ class App(QMainWindow):
         lower = QHBoxLayout()
         lower.setSpacing(16)
         lower.addWidget(TrendChart(), 1)
-        lower.addWidget(NodeTable(), 1)
+        self.node_table = NodeStatusTable()
+        lower.addWidget(self.node_table, 1)
         layout.addLayout(lower)
 
         self.log_box = QTextEdit()
@@ -851,6 +951,7 @@ class App(QMainWindow):
         self.system_state.setText("Estado: Ejecución")
         self.progress_bar.setRange(0, 0)
         self.log_box.setText("Procesando carga distribuida...\n")
+        self.node_table.set_nodes(parse_machinefile_hosts(MPI_MACHINEFILE))
         request = RunRequest(
             self.image_paths,
             self.selected_flags(),
@@ -867,6 +968,23 @@ class App(QMainWindow):
         self.log_box.moveCursor(QTextCursor.MoveOperation.End)
         self.log_box.insertPlainText(text)
         self.log_box.moveCursor(QTextCursor.MoveOperation.End)
+        self.update_node_table_from_log(text)
+
+    def update_node_table_from_log(self, text):
+        for line in text.splitlines():
+            assigned = re.search(r"\[rank\s+(\d+)(?:/\d+)?\]\s+procesara\s+(\d+)\s+imagen", line)
+            if assigned:
+                self.node_table.mark_assigned(int(assigned.group(1)), int(assigned.group(2)))
+                continue
+
+            processing = re.search(r"\[rank\s+(\d+)\]\s+procesando\s+(.+)$", line)
+            if processing:
+                self.node_table.mark_processing(int(processing.group(1)), processing.group(2).strip())
+                continue
+
+            finished = re.search(r"\[rank\s+(\d+)\]\s+termino\s+(.+)$", line)
+            if finished:
+                self.node_table.mark_finished_image(int(finished.group(1)), finished.group(2).strip())
 
     def handle_finished(self, output, returncode, elapsed):
         self.last_elapsed = elapsed
@@ -883,12 +1001,16 @@ class App(QMainWindow):
         if match:
             metric_elapsed = float(match.group(1))
             self.time_card.value_label.setText(f"{metric_elapsed:.1f} s")
+        rate_text = "Pendiente"
         if metric_elapsed > 0:
-            self.rate_card.value_label.setText(format_scientific(processed_pixels / metric_elapsed, "px/s"))
+            rate_text = format_scientific(processed_pixels / metric_elapsed, "px/s")
+            self.rate_card.value_label.setText(rate_text)
+            self.node_table.set_rate_for_all(rate_text)
+        self.node_table.mark_complete()
         output += (
             "\n\nMetrica de rendimiento:\n"
             f"Pixeles procesados: {format_scientific(processed_pixels, 'px')}\n"
-            f"Rendimiento: {format_scientific(processed_pixels / metric_elapsed, 'px/s') if metric_elapsed > 0 else 'Pendiente'}\n"
+            f"Rendimiento: {rate_text}\n"
         )
         self.log_box.setText(output)
         self.run_button.setEnabled(True)
