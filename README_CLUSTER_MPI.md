@@ -47,12 +47,16 @@ host Tailscale: ubuntu-master
 repo: /home/vboxuser/image-analyzer
 ```
 
-La esclava actual usa:
+Las esclavas actuales usan:
 
 ```text
 usuario: searching_ser
 host Tailscale: searchingser
 repo: /home/searching_ser/image-analyzer
+
+usuario: diego
+host Tailscale: diegovm
+repo: /home/diego/image-analyzer
 ```
 
 ## 2. [TODOS] Instalar paquetes base
@@ -80,6 +84,7 @@ Verifica que cada maquina tenga un nombre claro en Tailscale. Para este proyecto
 ```text
 ubuntu-master
 searchingser
+diegovm
 ```
 
 Desde la maestra, verifica resolucion y conectividad:
@@ -87,7 +92,9 @@ Desde la maestra, verifica resolucion y conectividad:
 ```bash
 getent hosts ubuntu-master
 getent hosts searchingser
+getent hosts diegovm
 ping -c 2 searchingser
+ping -c 2 diegovm
 ```
 
 ## 4. [MAESTRA] Configurar SSH sin contrasena
@@ -104,7 +111,9 @@ sudo systemctl enable --now ssh
 ```bash
 ssh-keygen -t ed25519
 ssh-copy-id searching_ser@searchingser
+ssh-copy-id diego@diegovm
 ssh searching_ser@searchingser hostname
+ssh diego@diegovm hostname
 ```
 
 Debe imprimir el hostname de la esclava sin pedir contrasena.
@@ -124,12 +133,16 @@ Host *
 
 Host searchingser
     User searching_ser
+
+Host diegovm
+    User diego
 ```
 
 Prueba:
 
 ```bash
 ssh -x searchingser hostname
+ssh -x diegovm hostname
 ```
 
 ## 5. [ESCLAVA] Montar carpeta compartida
@@ -317,6 +330,13 @@ cd /home/searching_ser/image-analyzer
 git pull
 ```
 
+[ESCLAVA] En la esclava `diegovm`:
+
+```bash
+cd /home/diego/image-analyzer
+git pull
+```
+
 [ESCLAVA] Si es una nueva esclava, clona el repo:
 
 ```bash
@@ -345,6 +365,15 @@ chmod +x para_image_mpi
 ldd ./para_image_mpi | grep mpich
 ```
 
+[ESCLAVA] En la esclava `diegovm`:
+
+```bash
+cd /home/diego/image-analyzer
+/opt/mpich-4.2.0/bin/mpicc -Wall -Wextra -std=c11 -fopenmp para_image_mpi.c selec_proc.c -o para_image_mpi
+chmod +x para_image_mpi
+ldd ./para_image_mpi | grep mpich
+```
+
 El `ldd` debe resolver `libmpich` desde `/opt/mpich-4.2.0/lib`.
 
 ## 9. [MAESTRA] Configurar machinefile
@@ -355,11 +384,12 @@ En la maestra, edita:
 nano /home/vboxuser/image-analyzer/machinefile
 ```
 
-Para una maestra y una esclava:
+Para la maestra y las dos esclavas actuales:
 
 ```text
 ubuntu-master:1
 searching_ser@searchingser:1
+diego@diegovm:1
 ```
 
 Para agregar mas esclavas, agrega una linea por esclava:
@@ -370,7 +400,9 @@ usuario@nombre-tailscale:1
 
 La GUI de `main.py` lee este archivo para decidir cuantas maquinas usar. El programa lanza un proceso MPI por cada linea del `machinefile`.
 
-El binario `para_image_mpi` reparte las imagenes entre todos los procesos MPI disponibles, incluyendo rank 0. Es decir, la maestra ya no solo asigna tareas: tambien procesa su parte de las imagenes.
+El binario `para_image_mpi` usa una cola dinamica de trabajo. Rank 0 asigna imagenes a las esclavas y tambien toma imagenes de la misma cola para procesarlas en la maestra. Cuando una maquina termina una imagen, recibe otra. Esto evita que el tiempo total quede dominado por la maquina mas lenta.
+
+Dentro de cada imagen, OpenMP paraleliza los tipos de procesamiento seleccionados. Por ejemplo, si estan activos `--gray`, `--vg`, `--vc`, `--hg`, `--hc`, `--bg` y `--bc`, esos procesamientos se ejecutan como secciones independientes usando los threads configurados.
 
 ## 10. [MAESTRA] Probar MPI basico
 
@@ -388,14 +420,15 @@ FI_TCP_IFACE=tailscale0 \
   -f /home/vboxuser/image-analyzer/machinefile \
   -wdir /mnt/mirror \
   -prepend-rank \
-  -n 2 hostname
+  -n 3 hostname
 ```
 
-Debe imprimir dos hosts, por ejemplo:
+Debe imprimir tres hosts, por ejemplo:
 
 ```text
 [0] UbuntuRedes
 [1] searchingser
+[2] diegovm
 ```
 
 ## 11. [TODOS] Probar hello_mpi
@@ -407,7 +440,7 @@ cd /home/vboxuser/image-analyzer
 
 /opt/mpich-4.2.0/bin/mpicc hello_mpi.c -o hello_mpi
 
-/opt/mpich-4.2.0/bin/mpich -prepend-rank -n 2 ./hello_mpi
+/opt/mpich-4.2.0/bin/mpiexec -prepend-rank -n 3 ./hello_mpi
 ```
 
 
@@ -429,7 +462,10 @@ FI_TCP_IFACE=tailscale0 \
   -n 1 /home/vboxuser/image-analyzer/hello_mpi \
   : \
   -wdir /mnt/mirror \
-  -n 1 /home/searching_ser/image-analyzer/hello_mpi
+  -n 1 /home/searching_ser/image-analyzer/hello_mpi \
+  : \
+  -wdir /mnt/mirror \
+  -n 1 /home/diego/image-analyzer/hello_mpi
 ```
 
 Debe pasar de `before MPI_Init` e imprimir los ranks.
@@ -448,6 +484,7 @@ rm -f /mnt/mirror/output/*
 
 ```bash
 ssh searching_ser@searchingser 'ls -l /mnt/mirror/input/test.bmp /mnt/mirror/output'
+ssh diego@diegovm 'ls -l /mnt/mirror/input/test.bmp /mnt/mirror/output'
 ```
 
 ## 13. [MAESTRA] Probar el proyecto distribuido
@@ -472,6 +509,10 @@ FI_TCP_IFACE=tailscale0 \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
+  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --gray --vg \
+  : \
+  -wdir /mnt/mirror \
+  -n 1 /home/diego/image-analyzer/para_image_mpi \
   12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --gray --vg
 ```
 
@@ -507,6 +548,10 @@ FI_TCP_IFACE=tailscale0 \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
+  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --gray --vg \
+  : \
+  -wdir /mnt/mirror \
+  -n 1 /home/diego/image-analyzer/para_image_mpi \
   12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --gray --vg
 ```
 
@@ -585,12 +630,14 @@ usuario@nuevo-host-tailscale:1
 MPI_HOSTS = [
     "ubuntu-master",
     "searching_ser@searchingser",
+    "diego@diegovm",
     "usuario@nuevo-host-tailscale",
 ]
 
 MPI_HOST_EXECUTABLES = {
     "ubuntu-master": "/home/vboxuser/image-analyzer/para_image_mpi",
     "searching_ser@searchingser": "/home/searching_ser/image-analyzer/para_image_mpi",
+    "diego@diegovm": "/home/diego/image-analyzer/para_image_mpi",
     "usuario@nuevo-host-tailscale": "/home/usuario/image-analyzer/para_image_mpi",
 }
 ```

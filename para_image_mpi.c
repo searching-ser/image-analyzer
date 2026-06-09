@@ -10,6 +10,9 @@
 #define MAX_IMAGES 1000
 #define MAX_PATH_LEN 260
 #define MAX_MASK_LEN 160
+#define MPI_TAG_WORK 100
+#define MPI_TAG_DONE 101
+#define MPI_NO_MORE_WORK -1
 
 typedef struct {
     int do_gray;
@@ -202,38 +205,85 @@ static int parse_kernel(int argc, char *argv[])
 static void process_image(const char *path, const ProcessFlags *flags, int kernel)
 {
     char base[120];
-    char mask[MAX_MASK_LEN];
 
     get_base_name(path, base, sizeof(base));
 
-    if (flags->do_gray) {
-        snprintf(mask, sizeof(mask), "%s_gray", base);
-        inv_img_grey(mask, (char *)path);
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        {
+            if (flags->do_gray) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_gray", base);
+                inv_img_grey(mask, (char *)path);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_vg) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_vg", base);
+                inv_img(mask, (char *)path);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_vc) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_vc", base);
+                inv_img_color(mask, (char *)path);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_hg) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_hg", base);
+                inv_img_grey_horizontal(mask, (char *)path);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_hc) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_hc", base);
+                inv_img_color_horizontal(mask, (char *)path);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_bg) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_bg", base);
+                desenfoque_grey((char *)path, mask, kernel);
+            }
+        }
+
+        #pragma omp section
+        {
+            if (flags->do_bc) {
+                char mask[MAX_MASK_LEN];
+                snprintf(mask, sizeof(mask), "%s_bc", base);
+                desenfoque((char *)path, mask, kernel);
+            }
+        }
     }
-    if (flags->do_vg) {
-        snprintf(mask, sizeof(mask), "%s_vg", base);
-        inv_img(mask, (char *)path);
-    }
-    if (flags->do_vc) {
-        snprintf(mask, sizeof(mask), "%s_vc", base);
-        inv_img_color(mask, (char *)path);
-    }
-    if (flags->do_hg) {
-        snprintf(mask, sizeof(mask), "%s_hg", base);
-        inv_img_grey_horizontal(mask, (char *)path);
-    }
-    if (flags->do_hc) {
-        snprintf(mask, sizeof(mask), "%s_hc", base);
-        inv_img_color_horizontal(mask, (char *)path);
-    }
-    if (flags->do_bg) {
-        snprintf(mask, sizeof(mask), "%s_bg", base);
-        desenfoque_grey((char *)path, mask, kernel);
-    }
-    if (flags->do_bc) {
-        snprintf(mask, sizeof(mask), "%s_bc", base);
-        desenfoque((char *)path, mask, kernel);
-    }
+}
+
+static void process_image_index(int rank, int image_index, char image_paths[][MAX_PATH_LEN],
+                                const ProcessFlags *flags, int kernel)
+{
+    char local_image[MAX_PATH_LEN];
+
+    normalize_shared_path(image_paths[image_index], local_image, sizeof(local_image));
+    printf("[rank %d] procesando %s\n", rank, local_image);
+    process_image(local_image, flags, kernel);
+    printf("[rank %d] termino %s\n", rank, local_image);
 }
 
 int main(int argc, char *argv[])
@@ -249,10 +299,6 @@ int main(int argc, char *argv[])
     int flags_array[7];
     double t_start;
     double t_end;
-    int start_index;
-    int end_index;
-    int my_count;
-    int i;
 
     setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "[pre-mpi] proceso iniciado argc=%d\n", argc);
@@ -327,10 +373,6 @@ int main(int argc, char *argv[])
 
     t_start = MPI_Wtime();
 
-    start_index = (rank * image_count) / world_size;
-    end_index = ((rank + 1) * image_count) / world_size;
-    my_count = end_index - start_index;
-
     {
         char local_output_dir[MAX_PATH_LEN];
 
@@ -339,16 +381,90 @@ int main(int argc, char *argv[])
         set_output_directory(local_output_dir);
     }
 
-    printf("[rank %d/%d] procesara %d imagen(es): indices %d..%d\n",
-           rank, world_size, my_count, start_index, end_index - 1);
+    if (rank == 0) {
+        int next_index = 0;
+        int completed = 0;
+        int active_workers = 0;
+        int worker_rank;
 
-    #pragma omp parallel for schedule(dynamic)
-    for (i = start_index; i < end_index; i++) {
-        char local_image[MAX_PATH_LEN];
-        normalize_shared_path(image_paths[i], local_image, sizeof(local_image));
-        printf("[rank %d] procesando %s\n", rank, local_image);
-        process_image(local_image, &flags, kernel);
-        printf("[rank %d] termino %s\n", rank, local_image);
+        printf("[rank 0/%d] cola dinamica iniciada con %d imagen(es)\n", world_size, image_count);
+
+        for (worker_rank = 1; worker_rank < world_size; worker_rank++) {
+            int work_index;
+
+            if (next_index < image_count) {
+                work_index = next_index++;
+                MPI_Send(&work_index, 1, MPI_INT, worker_rank, MPI_TAG_WORK, MPI_COMM_WORLD);
+                active_workers++;
+                printf("[rank 0] asigno indice %d a rank %d\n", work_index, worker_rank);
+            } else {
+                work_index = MPI_NO_MORE_WORK;
+                MPI_Send(&work_index, 1, MPI_INT, worker_rank, MPI_TAG_WORK, MPI_COMM_WORLD);
+            }
+        }
+
+        while (completed < image_count) {
+            int has_done = 0;
+            MPI_Status status;
+
+            do {
+                MPI_Iprobe(MPI_ANY_SOURCE, MPI_TAG_DONE, MPI_COMM_WORLD, &has_done, &status);
+                if (has_done) {
+                    int done_index;
+                    int work_index;
+
+                    MPI_Recv(&done_index, 1, MPI_INT, status.MPI_SOURCE, MPI_TAG_DONE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    completed++;
+                    printf("[rank 0] recibio fin de indice %d desde rank %d (%d/%d)\n",
+                           done_index, status.MPI_SOURCE, completed, image_count);
+
+                    if (next_index < image_count) {
+                        work_index = next_index++;
+                        MPI_Send(&work_index, 1, MPI_INT, status.MPI_SOURCE, MPI_TAG_WORK, MPI_COMM_WORLD);
+                        printf("[rank 0] asigno indice %d a rank %d\n", work_index, status.MPI_SOURCE);
+                    } else {
+                        work_index = MPI_NO_MORE_WORK;
+                        MPI_Send(&work_index, 1, MPI_INT, status.MPI_SOURCE, MPI_TAG_WORK, MPI_COMM_WORLD);
+                        active_workers--;
+                    }
+                }
+            } while (has_done);
+
+            if (next_index < image_count) {
+                int local_index = next_index++;
+
+                printf("[rank 0] tomo indice %d de la cola local\n", local_index);
+                process_image_index(rank, local_index, image_paths, &flags, kernel);
+                completed++;
+                printf("[rank 0] termino indice %d localmente (%d/%d)\n",
+                       local_index, completed, image_count);
+            } else if (active_workers > 0) {
+                int done_index;
+                int work_index = MPI_NO_MORE_WORK;
+                MPI_Status status;
+
+                MPI_Recv(&done_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_TAG_DONE, MPI_COMM_WORLD, &status);
+                completed++;
+                printf("[rank 0] recibio fin de indice %d desde rank %d (%d/%d)\n",
+                       done_index, status.MPI_SOURCE, completed, image_count);
+                MPI_Send(&work_index, 1, MPI_INT, status.MPI_SOURCE, MPI_TAG_WORK, MPI_COMM_WORLD);
+                active_workers--;
+            }
+        }
+    } else {
+        while (1) {
+            int work_index;
+
+            MPI_Recv(&work_index, 1, MPI_INT, 0, MPI_TAG_WORK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (work_index == MPI_NO_MORE_WORK) {
+                printf("[rank %d] cola terminada\n", rank);
+                break;
+            }
+
+            printf("[rank %d/%d] procesara 1 imagen(es): indice %d\n", rank, world_size, work_index);
+            process_image_index(rank, work_index, image_paths, &flags, kernel);
+            MPI_Send(&work_index, 1, MPI_INT, 0, MPI_TAG_DONE, MPI_COMM_WORLD);
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
