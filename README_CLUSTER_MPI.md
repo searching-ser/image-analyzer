@@ -413,7 +413,36 @@ Para reducir el cuello de botella de NFS/Tailscale, cada rank usa disco temporal
 /mnt/mirror/output             resultados finales compartidos
 ```
 
-Al iniciar, cada rank limpia sus `.bmp` temporales locales. Durante el procesamiento copia cada imagen asignada desde `/mnt/mirror/input` hacia su carpeta local en `/tmp`, procesa desde ahi y al terminar copia sus resultados `.bmp` a `/mnt/mirror/output`.
+Al iniciar, cada rank limpia sus `.bmp` temporales locales. Durante el procesamiento copia cada imagen asignada desde `/mnt/mirror/input` hacia su carpeta local en `/tmp`, procesa desde ahi y, al terminar cada imagen, copia sus resultados `.bmp` a `/mnt/mirror/output` y borra los temporales de esa imagen. Esto evita llenar `/tmp` cuando se procesan muchas imagenes con varios filtros.
+
+Si aparece `Disk quota exceeded` al compilar o durante la copia local, revisa espacio e inodos:
+
+```bash
+df -h / /tmp
+df -i / /tmp
+du -sh /tmp/image-analyzer-rank-* 2>/dev/null
+du -sh /var/tmp/image-analyzer-rank-* 2>/dev/null
+```
+
+Para limpiar temporales de corridas anteriores:
+
+```bash
+rm -rf /tmp/image-analyzer-rank-*
+rm -rf /var/tmp/image-analyzer-rank-*
+```
+
+Si el compilador no puede escribir en `/tmp`, compila usando un temporal dentro de tu home:
+
+```bash
+mkdir -p ~/tmp
+TMPDIR=$HOME/tmp /opt/mpich-4.2.0/bin/mpicc -Wall -Wextra -std=c11 -fopenmp para_image_mpi.c selec_proc.c -o para_image_mpi
+```
+
+Para ejecutar usando `/var/tmp` como temporal local del programa en todos los nodos, agrega este entorno al comando MPI:
+
+```bash
+-genv IMAGE_ANALYZER_TMPDIR /var/tmp
+```
 
 ## 10. [MAESTRA] Probar MPI basico
 

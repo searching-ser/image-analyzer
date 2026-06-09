@@ -69,6 +69,7 @@ MPI_EXTRA_ARGS = [] if LOCAL_ONLY_TESTING else [
     "-genv", "LD_LIBRARY_PATH", "/opt/mpich-4.2.0/lib",
     "-genv", "FI_PROVIDER", "tcp",
     "-genv", "FI_TCP_IFACE", "tailscale0",
+    "-genv", "IMAGE_ANALYZER_TMPDIR", "/var/tmp",
     "-localhost", MPI_MASTER_HOST,
     "-f", MPI_MACHINEFILE,
     "-prepend-rank",
@@ -77,6 +78,7 @@ MPI_ENV = {} if LOCAL_ONLY_TESTING else {
     "FI_PROVIDER": "tcp",
     "FI_TCP_IFACE": "tailscale0",
     "LD_LIBRARY_PATH": "/opt/mpich-4.2.0/lib",
+    "IMAGE_ANALYZER_TMPDIR": "/var/tmp",
 }
 
 MAX_UI_IMAGES = 600

@@ -70,7 +70,7 @@ static void remove_bmp_files(const char *dir_path)
 {
     DIR *dir;
     struct dirent *entry;
-    char full_path[MAX_PATH_LEN];
+    char full_path[LOCAL_PATH_LEN];
 
     dir = opendir(dir_path);
     if (dir == NULL) {
@@ -133,6 +133,17 @@ static char *build_image_path(const char *directory, const char *image_name)
 
     snprintf(path, needed, "%s/%s.bmp", directory, image_name);
     return path;
+}
+
+static const char *get_local_tmp_base(void)
+{
+    const char *tmp_base = getenv("IMAGE_ANALYZER_TMPDIR");
+
+    if (tmp_base == NULL || tmp_base[0] == '\0') {
+        return "/tmp";
+    }
+
+    return tmp_base;
 }
 
 static int has_bmp_extension(const char *path)
@@ -200,8 +211,8 @@ static void copy_bmp_files_to_directory(const char *source_dir, const char *dest
 {
     DIR *dir;
     struct dirent *entry;
-    char source_path[MAX_PATH_LEN];
-    char destination_path[MAX_PATH_LEN];
+    char source_path[LOCAL_PATH_LEN];
+    char destination_path[LOCAL_PATH_LEN];
 
     dir = opendir(source_dir);
     if (dir == NULL) {
@@ -217,6 +228,49 @@ static void copy_bmp_files_to_directory(const char *source_dir, const char *dest
         snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
         snprintf(destination_path, sizeof(destination_path), "%s/%s", destination_dir, entry->d_name);
         copy_file(source_path, destination_path);
+    }
+
+    closedir(dir);
+}
+
+static void copy_and_remove_outputs_for_image(const char *source_dir, const char *destination_dir,
+                                              const char *image_name)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char source_path[LOCAL_PATH_LEN];
+    char destination_path[LOCAL_PATH_LEN];
+    size_t image_name_len = strlen(image_name);
+
+    dir = opendir(source_dir);
+    if (dir == NULL) {
+        printf("Error: No se pudo abrir directorio local de salida %s\n", source_dir);
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (!has_bmp_extension(entry->d_name)) {
+            continue;
+        }
+        if (strncmp(entry->d_name, image_name, image_name_len) != 0 ||
+            entry->d_name[image_name_len] != '_') {
+            continue;
+        }
+
+        int source_len = snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
+        int destination_len = snprintf(destination_path, sizeof(destination_path), "%s/%s",
+                                       destination_dir, entry->d_name);
+
+        if (source_len < 0 || destination_len < 0 ||
+            (size_t)source_len >= sizeof(source_path) ||
+            (size_t)destination_len >= sizeof(destination_path)) {
+            printf("Error: Ruta de salida demasiado larga para %s\n", entry->d_name);
+            continue;
+        }
+
+        if (copy_file(source_path, destination_path)) {
+            remove(source_path);
+        }
     }
 
     closedir(dir);
@@ -385,7 +439,8 @@ static void process_image(const char *path, const ProcessFlags *flags, int kerne
 }
 
 static void process_image_index(int rank, int image_index, char image_paths[][MAX_PATH_LEN],
-                                const char *local_input_dir, const ProcessFlags *flags, int kernel)
+                                const char *local_input_dir, const char *local_output_dir,
+                                const char *shared_output_dir, const ProcessFlags *flags, int kernel)
 {
     char shared_image[MAX_PATH_LEN];
     char image_name[MAX_PATH_LEN];
@@ -409,6 +464,9 @@ static void process_image_index(int rank, int image_index, char image_paths[][MA
     printf("[rank %d] procesando %s\n", rank, local_image);
     process_image(local_image, flags, kernel);
     printf("[rank %d] termino %s\n", rank, local_image);
+    printf("[rank %d] copiando resultados de %s a %s\n", rank, image_name, shared_output_dir);
+    copy_and_remove_outputs_for_image(local_output_dir, shared_output_dir, image_name);
+    remove(local_image);
     free(local_image);
 }
 
@@ -420,6 +478,7 @@ int main(int argc, char *argv[])
     int kernel = 27;
     char output_dir[MAX_PATH_LEN] = {0};
     char shared_output_dir[MAX_PATH_LEN] = {0};
+    const char *local_tmp_base;
     char local_root_dir[LOCAL_PATH_LEN] = {0};
     char local_input_dir[LOCAL_PATH_LEN] = {0};
     char local_output_dir[LOCAL_PATH_LEN] = {0};
@@ -505,9 +564,13 @@ int main(int argc, char *argv[])
 
     omp_set_num_threads(num_threads);
     normalize_shared_path(output_dir, shared_output_dir, sizeof(shared_output_dir));
-    int root_len = snprintf(local_root_dir, sizeof(local_root_dir), "/tmp/image-analyzer-rank-%d", rank);
-    int input_len = snprintf(local_input_dir, sizeof(local_input_dir), "/tmp/image-analyzer-rank-%d/input", rank);
-    int output_len = snprintf(local_output_dir, sizeof(local_output_dir), "/tmp/image-analyzer-rank-%d/output", rank);
+    local_tmp_base = get_local_tmp_base();
+    int root_len = snprintf(local_root_dir, sizeof(local_root_dir), "%s/image-analyzer-rank-%d",
+                            local_tmp_base, rank);
+    int input_len = snprintf(local_input_dir, sizeof(local_input_dir), "%s/image-analyzer-rank-%d/input",
+                             local_tmp_base, rank);
+    int output_len = snprintf(local_output_dir, sizeof(local_output_dir), "%s/image-analyzer-rank-%d/output",
+                              local_tmp_base, rank);
 
     if (root_len < 0 || input_len < 0 || output_len < 0 ||
         (size_t)root_len >= sizeof(local_root_dir) ||
@@ -582,7 +645,8 @@ int main(int argc, char *argv[])
                 int local_index = next_index++;
 
                 printf("[rank 0] tomo indice %d de la cola local\n", local_index);
-                process_image_index(rank, local_index, image_paths, local_input_dir, &flags, kernel);
+                process_image_index(rank, local_index, image_paths, local_input_dir, local_output_dir,
+                                    shared_output_dir, &flags, kernel);
                 completed++;
                 printf("[rank 0] termino indice %d localmente (%d/%d)\n",
                        local_index, completed, image_count);
@@ -610,7 +674,8 @@ int main(int argc, char *argv[])
             }
 
             printf("[rank %d/%d] procesara 1 imagen(es): indice %d\n", rank, world_size, work_index);
-            process_image_index(rank, work_index, image_paths, local_input_dir, &flags, kernel);
+            process_image_index(rank, work_index, image_paths, local_input_dir, local_output_dir,
+                                shared_output_dir, &flags, kernel);
             MPI_Send(&work_index, 1, MPI_INT, 0, MPI_TAG_DONE, MPI_COMM_WORLD);
         }
     }
