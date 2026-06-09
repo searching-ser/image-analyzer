@@ -468,11 +468,11 @@ FI_TCP_IFACE=tailscale0 \
   -wdir /mnt/mirror \
   -prepend-rank \
   -n 1 /home/vboxuser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --vg \
+  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --gray --vg \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --vg
+  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --gray --vg
 ```
 
 Verifica resultado:
@@ -503,16 +503,28 @@ FI_TCP_IFACE=tailscale0 \
   -wdir /mnt/mirror \
   -prepend-rank \
   -n 1 /home/vboxuser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --vg \
+  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --gray --vg \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --vg
+  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --gray --vg
 ```
 
 La busqueda no es recursiva: procesa los `.bmp` que esten directamente dentro de la carpeta indicada.
 
 El kernel de blur se puede cambiar con `--kernel N`. Si no se manda ese argumento, el valor por defecto es `27`.
+
+Flags disponibles:
+
+```text
+--gray  Escala de grises
+--vg    Espejo vertical gris
+--vc    Espejo vertical color
+--hg    Espejo horizontal gris
+--hc    Espejo horizontal color
+--bg    Blur gris
+--bc    Blur color
+```
 
 ## 14. [MAESTRA] Probar desde la GUI
 

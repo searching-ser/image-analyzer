@@ -12,6 +12,7 @@
 #define MAX_MASK_LEN 160
 
 typedef struct {
+    int do_gray;
     int do_vg;
     int do_vc;
     int do_hg;
@@ -146,6 +147,7 @@ static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
 {
     int i;
 
+    flags->do_gray = 0;
     flags->do_vg = 0;
     flags->do_vc = 0;
     flags->do_hg = 0;
@@ -158,6 +160,7 @@ static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
             i++;
             continue;
         }
+        if (strcmp(argv[i], "--gray") == 0) flags->do_gray = 1;
         if (strcmp(argv[i], "--vg") == 0) flags->do_vg = 1;
         if (strcmp(argv[i], "--vc") == 0) flags->do_vc = 1;
         if (strcmp(argv[i], "--hg") == 0) flags->do_hg = 1;
@@ -166,8 +169,9 @@ static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
         if (strcmp(argv[i], "--bc") == 0) flags->do_bc = 1;
     }
 
-    if (!flags->do_vg && !flags->do_vc && !flags->do_hg &&
+    if (!flags->do_gray && !flags->do_vg && !flags->do_vc && !flags->do_hg &&
         !flags->do_hc && !flags->do_bg && !flags->do_bc) {
+        flags->do_gray = 1;
         flags->do_vg = 1;
         flags->do_vc = 1;
         flags->do_hg = 1;
@@ -202,6 +206,10 @@ static void process_image(const char *path, const ProcessFlags *flags, int kerne
 
     get_base_name(path, base, sizeof(base));
 
+    if (flags->do_gray) {
+        snprintf(mask, sizeof(mask), "%s_gray", base);
+        inv_img_grey(mask, (char *)path);
+    }
     if (flags->do_vg) {
         snprintf(mask, sizeof(mask), "%s_vg", base);
         inv_img(mask, (char *)path);
@@ -238,7 +246,7 @@ int main(int argc, char *argv[])
     char image_paths[MAX_IMAGES][MAX_PATH_LEN];
     int image_count = 0;
     ProcessFlags flags;
-    int flags_array[6];
+    int flags_array[7];
     double t_start;
     double t_end;
     int start_index;
@@ -261,7 +269,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0) {
         if (argc < 4) {
-            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img_o_carpeta1> [img_o_carpeta2 ...] [--kernel N] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img_o_carpeta1> [img_o_carpeta2 ...] [--kernel N] [--gray --vg --vc --hg --hc --bg --bc]\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
@@ -280,12 +288,13 @@ int main(int argc, char *argv[])
         }
         printf("[rank 0] imagenes recibidas=%d\n", image_count);
 
-        flags_array[0] = flags.do_vg;
-        flags_array[1] = flags.do_vc;
-        flags_array[2] = flags.do_hg;
-        flags_array[3] = flags.do_hc;
-        flags_array[4] = flags.do_bg;
-        flags_array[5] = flags.do_bc;
+        flags_array[0] = flags.do_gray;
+        flags_array[1] = flags.do_vg;
+        flags_array[2] = flags.do_vc;
+        flags_array[3] = flags.do_hg;
+        flags_array[4] = flags.do_hc;
+        flags_array[5] = flags.do_bg;
+        flags_array[6] = flags.do_bc;
     } else {
         memset(&flags, 0, sizeof(flags));
     }
@@ -297,21 +306,23 @@ int main(int argc, char *argv[])
     MPI_Bcast(image_paths, MAX_IMAGES * MAX_PATH_LEN, MPI_CHAR, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
-        flags_array[0] = flags.do_vg;
-        flags_array[1] = flags.do_vc;
-        flags_array[2] = flags.do_hg;
-        flags_array[3] = flags.do_hc;
-        flags_array[4] = flags.do_bg;
-        flags_array[5] = flags.do_bc;
+        flags_array[0] = flags.do_gray;
+        flags_array[1] = flags.do_vg;
+        flags_array[2] = flags.do_vc;
+        flags_array[3] = flags.do_hg;
+        flags_array[4] = flags.do_hc;
+        flags_array[5] = flags.do_bg;
+        flags_array[6] = flags.do_bc;
     }
-    MPI_Bcast(flags_array, 6, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(flags_array, 7, MPI_INT, 0, MPI_COMM_WORLD);
     if (rank != 0) {
-        flags.do_vg = flags_array[0];
-        flags.do_vc = flags_array[1];
-        flags.do_hg = flags_array[2];
-        flags.do_hc = flags_array[3];
-        flags.do_bg = flags_array[4];
-        flags.do_bc = flags_array[5];
+        flags.do_gray = flags_array[0];
+        flags.do_vg = flags_array[1];
+        flags.do_vc = flags_array[2];
+        flags.do_hg = flags_array[3];
+        flags.do_hc = flags_array[4];
+        flags.do_bg = flags_array[5];
+        flags.do_bc = flags_array[6];
     }
 
     t_start = MPI_Wtime();

@@ -82,12 +82,13 @@ MPI_ENV = {} if LOCAL_ONLY_TESTING else {
 MAX_UI_IMAGES = 600
 MAX_BACKEND_IMAGES = 10 if LOCAL_ONLY_TESTING else MAX_UI_IMAGES
 PROCESS_OPTIONS = [
-    ("Escala de grises", (), "placeholder"),
+    ("Escala de grises", ("--gray",), "functional"),
     ("Espejo horizontal color", ("--hc",), "functional"),
     ("Espejo vertical color", ("--vc",), "functional"),
     ("Espejo horizontal gris", ("--hg",), "functional"),
     ("Espejo vertical gris", ("--vg",), "functional"),
-    ("Blur kernel 55-155", ("--bg", "--bc"), "functional"),
+    ("Blur gris", ("--bg",), "functional"),
+    ("Blur color", ("--bc",), "functional"),
 ]
 TEAM_MEMBERS = [
     "Diego López Romero",
@@ -550,8 +551,8 @@ class App(QMainWindow):
 
         split = QHBoxLayout()
         split.setSpacing(16)
-        split.addWidget(self.info_card("Secciones funcionales", "Selección de carpeta BMP, detección de hasta 600 archivos, cálculo de píxeles, selección de opciones conectadas al backend, threads OpenMP y ejecución MPI en segundo plano.", "Conectado"))
-        split.addWidget(self.placeholder_card("Secciones placeholder", "Escala de grises independiente, ETA real por lote completo de 600 imágenes, métricas por nodo en vivo, comparativa AWS y enlaces de reporte/presentación."))
+        split.addWidget(self.info_card("Secciones funcionales", "Selección de carpeta BMP, detección de hasta 600 archivos, cálculo de píxeles, selección de opciones conectadas al backend, threads OpenMP, kernel de blur y ejecución MPI en segundo plano.", "Conectado"))
+        split.addWidget(self.placeholder_card("Secciones placeholder", "ETA real por lote completo de 600 imágenes, métricas por nodo en vivo, comparativa AWS y enlaces de reporte/presentación."))
         layout.addLayout(split)
 
         self.selection_note = QLabel()
