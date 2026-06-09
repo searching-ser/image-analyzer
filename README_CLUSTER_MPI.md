@@ -444,6 +444,28 @@ Para ejecutar usando `/var/tmp` como temporal local del programa en todos los no
 -genv IMAGE_ANALYZER_TMPDIR /var/tmp
 ```
 
+## Abortar una ejecucion MPI
+
+La UI tiene el boton **Abortar procesos**. Al presionarlo, detiene `mpiexec` en la maestra y ejecuta limpieza en los hosts del `machinefile` para terminar procesos `para_image_mpi` y `hydra_pmi_proxy`.
+
+Si necesitas hacerlo manualmente desde la maestra:
+
+```bash
+pkill -TERM -f para_image_mpi 2>/dev/null
+pkill -TERM -f hydra_pmi_proxy 2>/dev/null
+ssh -x searching_ser@searchingser 'pkill -TERM -f para_image_mpi 2>/dev/null; pkill -TERM -f hydra_pmi_proxy 2>/dev/null'
+ssh -x diego@diegovm 'pkill -TERM -f para_image_mpi 2>/dev/null; pkill -TERM -f hydra_pmi_proxy 2>/dev/null'
+```
+
+Si algun proceso queda atorado despues de unos segundos:
+
+```bash
+pkill -KILL -f para_image_mpi 2>/dev/null
+pkill -KILL -f hydra_pmi_proxy 2>/dev/null
+ssh -x searching_ser@searchingser 'pkill -KILL -f para_image_mpi 2>/dev/null; pkill -KILL -f hydra_pmi_proxy 2>/dev/null'
+ssh -x diego@diegovm 'pkill -KILL -f para_image_mpi 2>/dev/null; pkill -KILL -f hydra_pmi_proxy 2>/dev/null'
+```
+
 ## 10. [MAESTRA] Probar MPI basico
 
 Desde la maestra:

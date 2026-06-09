@@ -418,10 +418,48 @@ class ProcessingWorker(QThread):
     finished = Signal(str, int, float)
     failed = Signal(str)
     log_received = Signal(str)
+    aborted = Signal(str)
 
     def __init__(self, request):
         super().__init__()
         self.request = request
+        self.process = None
+        self.abort_requested = False
+
+    def abort(self):
+        self.abort_requested = True
+        process = self.process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    def cleanup_cluster_processes(self, hosts):
+        kill_command = (
+            "pkill -TERM -f para_image_mpi 2>/dev/null; "
+            "pkill -TERM -f hydra_pmi_proxy 2>/dev/null; "
+            "sleep 1; "
+            "pkill -KILL -f para_image_mpi 2>/dev/null; "
+            "pkill -KILL -f hydra_pmi_proxy 2>/dev/null"
+        )
+
+        for host in hosts:
+            if host in {"localhost", MPI_MASTER_HOST}:
+                command = ["bash", "-lc", kill_command]
+            else:
+                command = ["ssh", "-x", host, kill_command]
+
+            try:
+                subprocess.run(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=8,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
 
     def run(self):
         started = datetime.now()
@@ -457,9 +495,15 @@ class ProcessingWorker(QThread):
         image_paths = []
         try:
             for existing_bmp in SHARED_INPUT_DIR.glob("*.bmp"):
+                if self.abort_requested:
+                    self.aborted.emit("Ejecucion abortada antes de preparar la carpeta compartida.")
+                    return
                 existing_bmp.unlink()
 
             for index, source_text in enumerate(self.request.image_paths[:MAX_BACKEND_IMAGES]):
+                if self.abort_requested:
+                    self.aborted.emit("Ejecucion abortada durante la copia de imagenes a /mnt/mirror/input.")
+                    return
                 source = Path(source_text)
                 destination = SHARED_INPUT_DIR / source.name
                 if destination.exists() and source.resolve() != destination.resolve():
@@ -473,6 +517,10 @@ class ProcessingWorker(QThread):
 
         if not image_paths:
             self.failed.emit("No se encontraron imagenes BMP para procesar.")
+            return
+
+        if self.abort_requested:
+            self.aborted.emit("Ejecucion abortada antes de lanzar MPI.")
             return
 
         common_args = [
@@ -503,7 +551,7 @@ class ProcessingWorker(QThread):
         self.log_received.emit(output_parts[0])
 
         try:
-            process = subprocess.Popen(
+            self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -516,12 +564,33 @@ class ProcessingWorker(QThread):
             self.failed.emit("No se encontró mpiexec.\nInstala MPICH 4.2.0 o revisa la ruta de MPI_LAUNCHER.")
             return
 
+        process = self.process
         if process.stdout is not None:
             for line in process.stdout:
                 output_parts.append(line)
                 self.log_received.emit(line)
+                if self.abort_requested:
+                    break
+
+        if self.abort_requested and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            except OSError:
+                pass
 
         returncode = process.wait()
+        if self.abort_requested:
+            self.log_received.emit("\nAbortando procesos MPI en master y esclavas...\n")
+            self.cleanup_cluster_processes(mpi_hosts)
+            message = "".join(output_parts)
+            message += "\n\nEjecucion abortada por el usuario. Procesos MPI detenidos en master/esclavas."
+            self.aborted.emit(message)
+            return
+
         if returncode != 0:
             error_line = f"\nEl proceso termino con codigo {returncode}."
             output_parts.append(error_line)
@@ -822,6 +891,11 @@ class App(QMainWindow):
         self.run_button.setObjectName("primaryButton")
         self.run_button.clicked.connect(self.run_program)
         action_layout.addWidget(self.run_button)
+        self.abort_button = QPushButton("Abortar procesos")
+        self.abort_button.setObjectName("dangerButton")
+        self.abort_button.setEnabled(False)
+        self.abort_button.clicked.connect(self.abort_processing)
+        action_layout.addWidget(self.abort_button)
         layout.addLayout(action_layout)
         outer_layout.addLayout(layout)
         return panel
@@ -950,6 +1024,7 @@ class App(QMainWindow):
             self.log_box.setText("No hay carpeta con imágenes BMP seleccionada.")
             return
         self.run_button.setEnabled(False)
+        self.abort_button.setEnabled(True)
         self.system_state.setText("Estado: Ejecución")
         self.progress_bar.setRange(0, 0)
         self.log_box.setText("Procesando carga distribuida...\n")
@@ -964,7 +1039,17 @@ class App(QMainWindow):
         self.worker.log_received.connect(self.handle_log_received)
         self.worker.finished.connect(self.handle_finished)
         self.worker.failed.connect(self.handle_failed)
+        self.worker.aborted.connect(self.handle_aborted)
         self.worker.start()
+
+    def abort_processing(self):
+        if self.worker is None or not self.worker.isRunning():
+            return
+
+        self.abort_button.setEnabled(False)
+        self.system_state.setText("Estado: Abortando")
+        self.handle_log_received("\nSolicitud de aborto recibida. Deteniendo procesos MPI...\n")
+        self.worker.abort()
 
     def handle_log_received(self, text):
         self.log_box.moveCursor(QTextCursor.MoveOperation.End)
@@ -1016,6 +1101,7 @@ class App(QMainWindow):
         )
         self.log_box.setText(output)
         self.run_button.setEnabled(True)
+        self.abort_button.setEnabled(False)
         self.system_state.setText("Estado: Listo")
         self.updated_at.setText("Datos actualizados: " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
@@ -1024,7 +1110,17 @@ class App(QMainWindow):
         self.progress_bar.setValue(0)
         self.log_box.setText(message)
         self.run_button.setEnabled(True)
+        self.abort_button.setEnabled(False)
         self.system_state.setText("Estado: Requiere configuración")
+
+    def handle_aborted(self, message):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.log_box.setText(message)
+        self.run_button.setEnabled(True)
+        self.abort_button.setEnabled(False)
+        self.system_state.setText("Estado: Abortado")
+        self.updated_at.setText("Datos actualizados: " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
     def show_about(self):
         AboutDialog(self).exec()
@@ -1071,6 +1167,17 @@ class App(QMainWindow):
                 color: white;
                 border: 1px solid #076d82;
                 font-weight: 700;
+            }
+            #dangerButton {
+                background: #b42318;
+                color: white;
+                border: 1px solid #b42318;
+                font-weight: 700;
+            }
+            #dangerButton:disabled {
+                background: #e3e8ef;
+                color: #697586;
+                border: 1px solid #cfd7e3;
             }
             #navButton, #threadButton {
                 font-weight: 700;
