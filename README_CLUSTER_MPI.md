@@ -404,6 +404,17 @@ El binario `para_image_mpi` usa una cola dinamica de trabajo. Rank 0 asigna imag
 
 Dentro de cada imagen, OpenMP paraleliza los tipos de procesamiento seleccionados. Por ejemplo, si estan activos `--gray`, `--vg`, `--vc`, `--hg`, `--hc`, `--bg` y `--bc`, esos procesamientos se ejecutan como secciones independientes usando los threads configurados.
 
+Para reducir el cuello de botella de NFS/Tailscale, cada rank usa disco temporal local:
+
+```text
+/mnt/mirror/input              entrada compartida inicial
+/tmp/image-analyzer-rank-X/input   copia local de la imagen que procesa el rank X
+/tmp/image-analyzer-rank-X/output  resultados temporales locales del rank X
+/mnt/mirror/output             resultados finales compartidos
+```
+
+Al iniciar, cada rank limpia sus `.bmp` temporales locales. Durante el procesamiento copia cada imagen asignada desde `/mnt/mirror/input` hacia su carpeta local en `/tmp`, procesa desde ahi y al terminar copia sus resultados `.bmp` a `/mnt/mirror/output`.
+
 ## 10. [MAESTRA] Probar MPI basico
 
 Desde la maestra:

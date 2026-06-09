@@ -3,6 +3,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include <omp.h>
 #include <mpi.h>
 #include "selec_proc.h"
@@ -23,6 +24,8 @@ typedef struct {
     int do_bg;
     int do_bc;
 } ProcessFlags;
+
+static int has_bmp_extension(const char *path);
 
 static void get_base_name(const char *path, char *output, size_t size)
 {
@@ -50,6 +53,72 @@ static void normalize_shared_path(const char *input, char *output, size_t size)
 {
     strncpy(output, input, size - 1);
     output[size - 1] = '\0';
+}
+
+static int ensure_directory(const char *path)
+{
+    if (mkdir(path, 0777) == 0 || errno == EEXIST) {
+        return 1;
+    }
+
+    printf("Error: No se pudo crear directorio %s\n", path);
+    return 0;
+}
+
+static void remove_bmp_files(const char *dir_path)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[MAX_PATH_LEN];
+
+    dir = opendir(dir_path);
+    if (dir == NULL) {
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (!has_bmp_extension(entry->d_name)) {
+            continue;
+        }
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        remove(full_path);
+    }
+
+    closedir(dir);
+}
+
+static int copy_file(const char *source_path, const char *destination_path)
+{
+    FILE *source;
+    FILE *destination;
+    unsigned char buffer[65536];
+    size_t bytes_read;
+
+    source = fopen(source_path, "rb");
+    if (source == NULL) {
+        printf("Error: No se pudo abrir origen %s\n", source_path);
+        return 0;
+    }
+
+    destination = fopen(destination_path, "wb");
+    if (destination == NULL) {
+        fclose(source);
+        printf("Error: No se pudo abrir destino %s\n", destination_path);
+        return 0;
+    }
+
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), source)) > 0) {
+        if (fwrite(buffer, 1, bytes_read, destination) != bytes_read) {
+            fclose(source);
+            fclose(destination);
+            printf("Error: No se pudo escribir %s\n", destination_path);
+            return 0;
+        }
+    }
+
+    fclose(source);
+    fclose(destination);
+    return 1;
 }
 
 static int has_bmp_extension(const char *path)
@@ -108,6 +177,32 @@ static void add_images_from_directory(char images[][MAX_PATH_LEN], int *image_co
 
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
         add_image_path(images, image_count, full_path);
+    }
+
+    closedir(dir);
+}
+
+static void copy_bmp_files_to_directory(const char *source_dir, const char *destination_dir)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char source_path[MAX_PATH_LEN];
+    char destination_path[MAX_PATH_LEN];
+
+    dir = opendir(source_dir);
+    if (dir == NULL) {
+        printf("Error: No se pudo abrir directorio local de salida %s\n", source_dir);
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (!has_bmp_extension(entry->d_name)) {
+            continue;
+        }
+
+        snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
+        snprintf(destination_path, sizeof(destination_path), "%s/%s", destination_dir, entry->d_name);
+        copy_file(source_path, destination_path);
     }
 
     closedir(dir);
@@ -276,11 +371,22 @@ static void process_image(const char *path, const ProcessFlags *flags, int kerne
 }
 
 static void process_image_index(int rank, int image_index, char image_paths[][MAX_PATH_LEN],
-                                const ProcessFlags *flags, int kernel)
+                                const char *local_input_dir, const ProcessFlags *flags, int kernel)
 {
+    char shared_image[MAX_PATH_LEN];
+    char image_name[MAX_PATH_LEN];
     char local_image[MAX_PATH_LEN];
 
-    normalize_shared_path(image_paths[image_index], local_image, sizeof(local_image));
+    normalize_shared_path(image_paths[image_index], shared_image, sizeof(shared_image));
+    get_base_name(shared_image, image_name, sizeof(image_name));
+    snprintf(local_image, sizeof(local_image), "%s/%s.bmp", local_input_dir, image_name);
+
+    printf("[rank %d] copiando entrada %s -> %s\n", rank, shared_image, local_image);
+    if (!copy_file(shared_image, local_image)) {
+        printf("[rank %d] no pudo copiar %s\n", rank, shared_image);
+        return;
+    }
+
     printf("[rank %d] procesando %s\n", rank, local_image);
     process_image(local_image, flags, kernel);
     printf("[rank %d] termino %s\n", rank, local_image);
@@ -293,6 +399,10 @@ int main(int argc, char *argv[])
     int num_threads = 0;
     int kernel = 27;
     char output_dir[MAX_PATH_LEN] = {0};
+    char shared_output_dir[MAX_PATH_LEN] = {0};
+    char local_root_dir[MAX_PATH_LEN] = {0};
+    char local_input_dir[MAX_PATH_LEN] = {0};
+    char local_output_dir[MAX_PATH_LEN] = {0};
     char image_paths[MAX_IMAGES][MAX_PATH_LEN];
     int image_count = 0;
     ProcessFlags flags;
@@ -373,13 +483,23 @@ int main(int argc, char *argv[])
 
     t_start = MPI_Wtime();
 
-    {
-        char local_output_dir[MAX_PATH_LEN];
+    omp_set_num_threads(num_threads);
+    normalize_shared_path(output_dir, shared_output_dir, sizeof(shared_output_dir));
+    snprintf(local_root_dir, sizeof(local_root_dir), "/tmp/image-analyzer-rank-%d", rank);
+    snprintf(local_input_dir, sizeof(local_input_dir), "%s/input", local_root_dir);
+    snprintf(local_output_dir, sizeof(local_output_dir), "%s/output", local_root_dir);
 
-        omp_set_num_threads(num_threads);
-        normalize_shared_path(output_dir, local_output_dir, sizeof(local_output_dir));
-        set_output_directory(local_output_dir);
+    if (!ensure_directory(local_root_dir) ||
+        !ensure_directory(local_input_dir) ||
+        !ensure_directory(local_output_dir)) {
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
+
+    remove_bmp_files(local_input_dir);
+    remove_bmp_files(local_output_dir);
+    set_output_directory(local_output_dir);
+    printf("[rank %d] entrada local=%s salida local=%s salida compartida=%s\n",
+           rank, local_input_dir, local_output_dir, shared_output_dir);
 
     if (rank == 0) {
         int next_index = 0;
@@ -434,7 +554,7 @@ int main(int argc, char *argv[])
                 int local_index = next_index++;
 
                 printf("[rank 0] tomo indice %d de la cola local\n", local_index);
-                process_image_index(rank, local_index, image_paths, &flags, kernel);
+                process_image_index(rank, local_index, image_paths, local_input_dir, &flags, kernel);
                 completed++;
                 printf("[rank 0] termino indice %d localmente (%d/%d)\n",
                        local_index, completed, image_count);
@@ -462,10 +582,13 @@ int main(int argc, char *argv[])
             }
 
             printf("[rank %d/%d] procesara 1 imagen(es): indice %d\n", rank, world_size, work_index);
-            process_image_index(rank, work_index, image_paths, &flags, kernel);
+            process_image_index(rank, work_index, image_paths, local_input_dir, &flags, kernel);
             MPI_Send(&work_index, 1, MPI_INT, 0, MPI_TAG_DONE, MPI_COMM_WORLD);
         }
     }
+
+    printf("[rank %d] copiando resultados locales a %s\n", rank, shared_output_dir);
+    copy_bmp_files_to_directory(local_output_dir, shared_output_dir);
 
     MPI_Barrier(MPI_COMM_WORLD);
     t_end = MPI_Wtime();
