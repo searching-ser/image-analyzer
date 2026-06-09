@@ -642,7 +642,10 @@ class App(QMainWindow):
         self.system_user = QLabel(f"Modo: {mode}")
         self.system_version = QLabel("Versión: 1.0.0")
         self.system_date = QLabel("Fecha: " + datetime.now().strftime("%d/%m/%Y %H:%M"))
-        for item in [self.system_state, self.system_user, self.system_version, self.system_date]:
+        self.system_wiki = QLabel('<a href="https://github.com/searching-ser/image-analyzer/wiki">Wiki del proyecto</a>')
+        self.system_wiki.setOpenExternalLinks(True)
+        self.system_wiki.setWordWrap(True)
+        for item in [self.system_state, self.system_user, self.system_version, self.system_date, self.system_wiki]:
             system_layout.addWidget(item)
         layout.addWidget(system)
         return sidebar
