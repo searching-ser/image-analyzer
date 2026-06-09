@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QPainter, QPen, QTextCursor
+from PySide6.QtGui import QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -608,6 +608,8 @@ class App(QMainWindow):
         self.image_paths = []
         self.worker = None
         self.last_elapsed = 0.0
+        self.processed_image_count = 0
+        self.finished_image_paths = set()
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -621,9 +623,7 @@ class App(QMainWindow):
         self.stack = QStackedWidget()
         shell.addWidget(self.stack, 1)
         self.metrics_page = self.build_metrics_page()
-        self.costs_page = self.build_costs_page()
         self.stack.addWidget(self.metrics_page)
-        self.stack.addWidget(self.costs_page)
 
         self.apply_styles()
         self.refresh_metrics()
@@ -636,6 +636,24 @@ class App(QMainWindow):
         layout.setContentsMargins(20, 26, 20, 20)
         layout.setSpacing(12)
 
+        logo = QLabel()
+        logo.setObjectName("sidebarLogo")
+        logo.setAlignment(Qt.AlignCenter)
+        logo_pixmap = QPixmap(str(PROJECT_DIR / "img" / "tecnologico_monterrey.png"))
+        if not logo_pixmap.isNull():
+            logo.setPixmap(logo_pixmap.scaledToWidth(176, Qt.SmoothTransformation))
+        layout.addWidget(logo)
+
+        course = QLabel("Implementación de redes de área amplia y servicios distribuidos (Gpo 502)")
+        course.setObjectName("courseInfo")
+        course.setWordWrap(True)
+        course.setAlignment(Qt.AlignCenter)
+        layout.addWidget(course)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        layout.addWidget(divider)
+
         members_title = QLabel("Integrantes")
         members_title.setObjectName("sideTitle")
         layout.addWidget(members_title)
@@ -646,23 +664,6 @@ class App(QMainWindow):
         divider.setFrameShape(QFrame.HLine)
         layout.addWidget(divider)
 
-        views = QLabel("Vistas")
-        views.setObjectName("sideTitle")
-        layout.addWidget(views)
-        self.nav_group = QButtonGroup(self)
-        self.nav_group.setExclusive(True)
-        self.nav_metrics = QPushButton("Métricas")
-        self.nav_metrics.setObjectName("navButton")
-        self.nav_metrics.setCheckable(True)
-        self.nav_metrics.setChecked(True)
-        self.nav_costs = QPushButton("Costos")
-        self.nav_costs.setObjectName("navButton")
-        self.nav_costs.setCheckable(True)
-        self.nav_group.addButton(self.nav_metrics, 0)
-        self.nav_group.addButton(self.nav_costs, 1)
-        self.nav_group.idClicked.connect(self.show_view)
-        layout.addWidget(self.nav_metrics)
-        layout.addWidget(self.nav_costs)
         layout.addStretch()
 
         system = QFrame()
@@ -678,9 +679,6 @@ class App(QMainWindow):
             system_layout.addWidget(item)
         layout.addWidget(system)
         return sidebar
-
-    def show_view(self, index):
-        self.stack.setCurrentIndex(index)
 
     def build_metrics_page(self):
         scroll = QScrollArea()
@@ -719,18 +717,6 @@ class App(QMainWindow):
         top.addWidget(self.build_options_panel(), 1)
         layout.addLayout(top)
 
-        split = QHBoxLayout()
-        split.setSpacing(16)
-        split.addWidget(self.info_card("Secciones funcionales", "Selección de carpeta BMP, detección de hasta 600 archivos, cálculo de píxeles, selección de opciones conectadas al backend, threads OpenMP, kernel de blur y ejecución MPI en segundo plano.", "Conectado"))
-        split.addWidget(self.placeholder_card("Secciones placeholder", "ETA real por lote completo de 600 imágenes, métricas por nodo en vivo, comparativa AWS y enlaces de reporte/presentación."))
-        layout.addLayout(split)
-
-        self.selection_note = QLabel()
-        self.selection_note.setObjectName("statusNote")
-        self.selection_note.setWordWrap(True)
-        self.selection_note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        layout.addWidget(self.selection_note)
-
         self.progress_group = QFrame()
         self.progress_group.setObjectName("progressCard")
         self.progress_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -747,16 +733,11 @@ class App(QMainWindow):
         self.progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         progress_layout.addWidget(self.progress_bar)
         progress_meta = QHBoxLayout()
-        self.progress_count = QLabel("0 / 0 imágenes conectadas al backend actual")
-        self.progress_eta = QLabel("Tiempo estimado restante: pendiente")
+        self.progress_count = QLabel("   0 / 0")
         self.progress_count.setWordWrap(True)
-        self.progress_eta.setWordWrap(True)
         self.progress_count.setMinimumWidth(0)
-        self.progress_eta.setMinimumWidth(0)
         self.progress_count.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.progress_eta.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         progress_meta.addWidget(self.progress_count, 1)
-        progress_meta.addWidget(self.progress_eta, 1)
         progress_layout.addLayout(progress_meta)
         layout.addWidget(self.progress_group)
 
@@ -779,6 +760,9 @@ class App(QMainWindow):
         lower.addWidget(self.node_table, 1)
         layout.addLayout(lower)
 
+        log_title = QLabel("Salida de logs")
+        log_title.setObjectName("fieldLabel")
+        layout.addWidget(log_title)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setPlaceholderText("La salida del proceso MPI aparecerá aquí.")
@@ -900,18 +884,6 @@ class App(QMainWindow):
         outer_layout.addLayout(layout)
         return panel
 
-    def build_costs_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(28, 24, 28, 24)
-        title = QLabel("Costos")
-        title.setObjectName("title")
-        layout.addWidget(title)
-        layout.addWidget(self.placeholder_card("Comparativa anual AWS", "Reservado para integrar la estimación de operación 8 horas diarias de lunes a viernes contra un servicio AWS equivalente."))
-        layout.addWidget(self.placeholder_card("Reporte y presentación", "Reservado para enlazar el reporte de GitHub y la presentación final solicitada en el reto."))
-        layout.addStretch()
-        return page
-
     def metric_card(self, label, value):
         card = QFrame()
         card.setObjectName("metricCard")
@@ -969,6 +941,8 @@ class App(QMainWindow):
         folder_path = Path(folder)
         images = sorted(str(path) for path in folder_path.iterdir() if path.is_file() and path.suffix.lower() == ".bmp")
         self.image_paths = images[:MAX_UI_IMAGES]
+        self.processed_image_count = 0
+        self.finished_image_paths.clear()
         self.input_path_label.setText(str(folder_path))
         self.refresh_metrics()
 
@@ -1000,23 +974,33 @@ class App(QMainWindow):
         input_pixels = sum(read_bmp_pixels(path) for path in paths)
         return input_pixels * self.selected_operation_count()
 
+    def runnable_image_count(self):
+        return min(len(self.image_paths), MAX_BACKEND_IMAGES)
+
+    def update_processed_progress(self, processed=None):
+        total = self.runnable_image_count()
+        if processed is not None:
+            self.processed_image_count = max(0, min(processed, total))
+
+        self.progress_count.setText(f"Imagenes Procesadas: {self.processed_image_count} / {total}")
+        if total == 0:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            return
+
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(max(0, min(self.processed_image_count, total)))
+
     def refresh_metrics(self):
         image_count = len(self.image_paths)
-        runnable = min(image_count, MAX_BACKEND_IMAGES)
         processed_pixels = self.processed_pixel_count(self.image_paths[:MAX_BACKEND_IMAGES])
 
-        self.progress_bar.setValue(100 if self.last_elapsed and runnable else 0)
-        self.progress_count.setText(f"0 / {runnable} imágenes conectadas al backend actual")
-        self.progress_eta.setText("Tiempo estimado restante: placeholder hasta ejecución asíncrona por lote completo")
+        self.update_processed_progress()
         self.pixel_card.value_label.setText(format_scientific(processed_pixels, "px"))
         if image_count > MAX_BACKEND_IMAGES:
-            self.batch_card.value_label.setText(f"{runnable} de {image_count}")
+            self.batch_card.value_label.setText(f"{self.runnable_image_count()} de {image_count}")
         else:
             self.batch_card.value_label.setText(str(image_count))
-        self.selection_note.setText(
-            f"Funcional: selección de carpeta BMP, opciones, threads y ejecución MPI para {MAX_BACKEND_IMAGES} imágenes. "
-            f"Placeholder: orquestación completa de hasta {MAX_UI_IMAGES} imágenes, ETA en vivo, costos AWS y reporte."
-        )
         self.updated_at.setText("Datos actualizados: " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
     def run_program(self):
@@ -1026,7 +1010,8 @@ class App(QMainWindow):
         self.run_button.setEnabled(False)
         self.abort_button.setEnabled(True)
         self.system_state.setText("Estado: Ejecución")
-        self.progress_bar.setRange(0, 0)
+        self.finished_image_paths.clear()
+        self.update_processed_progress(0)
         self.log_box.setText("Procesando carga distribuida...\n")
         self.node_table.set_nodes(parse_machinefile_hosts(MPI_MACHINEFILE))
         request = RunRequest(
@@ -1071,16 +1056,19 @@ class App(QMainWindow):
 
             finished = re.search(r"\[rank\s+(\d+)\]\s+termino\s+(.+)$", line)
             if finished:
-                self.node_table.mark_finished_image(int(finished.group(1)), finished.group(2).strip())
+                image_path = finished.group(2).strip()
+                self.node_table.mark_finished_image(int(finished.group(1)), image_path)
+                if image_path not in self.finished_image_paths:
+                    self.finished_image_paths.add(image_path)
+                    self.update_processed_progress(len(self.finished_image_paths))
 
     def handle_finished(self, output, returncode, elapsed):
         self.last_elapsed = elapsed
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100 if returncode == 0 else 0)
-        runnable = min(len(self.image_paths), MAX_BACKEND_IMAGES)
+        runnable = self.runnable_image_count()
         if returncode == 0:
-            self.progress_count.setText(f"{runnable} / {runnable} imágenes conectadas al backend actual")
-        self.progress_eta.setText("Tiempo estimado restante: 00:00:00")
+            self.update_processed_progress(runnable)
+        else:
+            self.update_processed_progress()
         self.time_card.value_label.setText(f"{elapsed:.1f} s")
         processed_pixels = self.processed_pixel_count(self.image_paths[:MAX_BACKEND_IMAGES])
         metric_elapsed = elapsed
@@ -1106,16 +1094,14 @@ class App(QMainWindow):
         self.updated_at.setText("Datos actualizados: " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
     def handle_failed(self, message):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.update_processed_progress(0)
         self.log_box.setText(message)
         self.run_button.setEnabled(True)
         self.abort_button.setEnabled(False)
         self.system_state.setText("Estado: Requiere configuración")
 
     def handle_aborted(self, message):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.update_processed_progress()
         self.log_box.setText(message)
         self.run_button.setEnabled(True)
         self.abort_button.setEnabled(False)
@@ -1141,6 +1127,11 @@ class App(QMainWindow):
             }
             #sideTitle, #fieldLabel, QGroupBox {
                 font-weight: 700;
+            }
+            #courseInfo {
+                color: #243b5a;
+                font-weight: 700;
+                line-height: 1.25;
             }
             #title {
                 font-size: 28px;
