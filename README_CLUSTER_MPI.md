@@ -468,11 +468,11 @@ FI_TCP_IFACE=tailscale0 \
   -wdir /mnt/mirror \
   -prepend-rank \
   -n 1 /home/vboxuser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --vg \
+  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --vg \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --vg
+  12 /mnt/mirror/output /mnt/mirror/input/test.bmp --kernel 27 --vg
 ```
 
 Verifica resultado:
@@ -503,14 +503,16 @@ FI_TCP_IFACE=tailscale0 \
   -wdir /mnt/mirror \
   -prepend-rank \
   -n 1 /home/vboxuser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input --vg \
+  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --vg \
   : \
   -wdir /mnt/mirror \
   -n 1 /home/searching_ser/image-analyzer/para_image_mpi \
-  12 /mnt/mirror/output /mnt/mirror/input --vg
+  12 /mnt/mirror/output /mnt/mirror/input --kernel 27 --vg
 ```
 
 La busqueda no es recursiva: procesa los `.bmp` que esten directamente dentro de la carpeta indicada.
+
+El kernel de blur se puede cambiar con `--kernel N`. Si no se manda ese argumento, el valor por defecto es `27`.
 
 ## 14. [MAESTRA] Probar desde la GUI
 

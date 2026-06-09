@@ -309,6 +309,7 @@ class RunRequest:
     image_paths: list
     selected_flags: list
     thread_count: str
+    kernel_size: str
 
 
 class ProcessingWorker(QThread):
@@ -372,7 +373,14 @@ class ProcessingWorker(QThread):
             self.failed.emit("No se encontraron imagenes BMP para procesar.")
             return
 
-        common_args = [self.request.thread_count, str(SHARED_OUTPUT_DIR), str(SHARED_INPUT_DIR), *self.request.selected_flags]
+        common_args = [
+            self.request.thread_count,
+            str(SHARED_OUTPUT_DIR),
+            str(SHARED_INPUT_DIR),
+            "--kernel",
+            self.request.kernel_size,
+            *self.request.selected_flags,
+        ]
         mpi_hosts = parse_machinefile_hosts(MPI_MACHINEFILE)
 
         if not mpi_hosts:
@@ -689,6 +697,22 @@ class App(QMainWindow):
             self.thread_group.addButton(button)
             thread_row.addWidget(button)
         action_layout.addLayout(thread_row)
+
+        action_layout.addWidget(QLabel("Kernel blur"))
+        kernel_row = QHBoxLayout()
+        kernel_row.setSpacing(8)
+        self.kernel_group = QButtonGroup(self)
+        self.kernel_group.setExclusive(True)
+        for value in ["27", "55", "75", "95", "115", "135", "155"]:
+            button = QPushButton(value)
+            button.setObjectName("threadButton")
+            button.setCheckable(True)
+            if value == "27":
+                button.setChecked(True)
+            self.kernel_group.addButton(button)
+            kernel_row.addWidget(button)
+        action_layout.addLayout(kernel_row)
+
         action_layout.addStretch()
         self.run_button = QPushButton("Procesar carga distribuida")
         self.run_button.setObjectName("primaryButton")
@@ -774,6 +798,10 @@ class App(QMainWindow):
         button = self.thread_group.checkedButton()
         return button.text() if button else "12"
 
+    def selected_kernel_size(self):
+        button = self.kernel_group.checkedButton()
+        return button.text() if button else "27"
+
     def selected_flags(self):
         flags = []
         for checkbox in self.option_checks:
@@ -811,7 +839,12 @@ class App(QMainWindow):
         self.system_state.setText("Estado: Ejecución")
         self.progress_bar.setRange(0, 0)
         self.log_box.setText("Procesando carga distribuida...\n")
-        request = RunRequest(self.image_paths, self.selected_flags(), self.selected_thread_count())
+        request = RunRequest(
+            self.image_paths,
+            self.selected_flags(),
+            self.selected_thread_count(),
+            self.selected_kernel_size(),
+        )
         self.worker = ProcessingWorker(request)
         self.worker.log_received.connect(self.handle_log_received)
         self.worker.finished.connect(self.handle_finished)

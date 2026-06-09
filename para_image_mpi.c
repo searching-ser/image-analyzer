@@ -118,6 +118,11 @@ static void collect_image_paths(int argc, char *argv[], char images[][MAX_PATH_L
     for (i = 3; i < argc; i++) {
         struct stat path_stat;
 
+        if (strcmp(argv[i], "--kernel") == 0) {
+            i++;
+            continue;
+        }
+
         if (argv[i][0] == '-') {
             continue;
         }
@@ -149,6 +154,10 @@ static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
     flags->do_bc = 0;
 
     for (i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--kernel") == 0) {
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--vg") == 0) flags->do_vg = 1;
         if (strcmp(argv[i], "--vc") == 0) flags->do_vc = 1;
         if (strcmp(argv[i], "--hg") == 0) flags->do_hg = 1;
@@ -166,6 +175,24 @@ static void parse_flags(int argc, char *argv[], ProcessFlags *flags)
         flags->do_bg = 1;
         flags->do_bc = 1;
     }
+}
+
+static int parse_kernel(int argc, char *argv[])
+{
+    int i;
+
+    for (i = 3; i < argc - 1; i++) {
+        if (strcmp(argv[i], "--kernel") == 0) {
+            int kernel = atoi(argv[i + 1]);
+            if (kernel > 0) {
+                return kernel;
+            }
+            printf("Aviso: kernel invalido '%s'. Se usara 27.\n", argv[i + 1]);
+            return 27;
+        }
+    }
+
+    return 27;
 }
 
 static void process_image(const char *path, const ProcessFlags *flags, int kernel)
@@ -234,15 +261,16 @@ int main(int argc, char *argv[])
 
     if (rank == 0) {
         if (argc < 4) {
-            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img_o_carpeta1> [img_o_carpeta2 ...] [--vg --vc --hg --hc --bg --bc]\n");
+            printf("Uso: mpirun -n <procesos> para_image_mpi <threads_locales> <output_dir> <img_o_carpeta1> [img_o_carpeta2 ...] [--kernel N] [--vg --vc --hg --hc --bg --bc]\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
         num_threads = atoi(argv[1]);
+        kernel = parse_kernel(argc, argv);
         strncpy(output_dir, argv[2], MAX_PATH_LEN - 1);
         output_dir[MAX_PATH_LEN - 1] = '\0';
         parse_flags(argc, argv, &flags);
-        printf("[rank 0] threads=%d output=%s\n", num_threads, output_dir);
+        printf("[rank 0] threads=%d kernel=%d output=%s\n", num_threads, kernel, output_dir);
 
         collect_image_paths(argc, argv, image_paths, &image_count);
 
