@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QPainter, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -226,39 +226,6 @@ class FolderDropZone(QFrame):
                 event.acceptProposedAction()
                 return
         event.ignore()
-
-
-class TrendChart(QFrame):
-    def __init__(self):
-        super().__init__()
-        self.setMinimumHeight(220)
-        self.setObjectName("card")
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = self.rect().adjusted(24, 58, -24, -44)
-
-        painter.setPen(QPen(Qt.GlobalColor.lightGray, 1))
-        for index in range(5):
-            y = rect.top() + index * rect.height() / 4
-            painter.drawLine(rect.left(), int(y), rect.right(), int(y))
-
-        painter.setPen(QPen(Qt.GlobalColor.black, 1))
-        painter.drawText(18, 26, "Rendimiento en el tiempo")
-
-        painter.setPen(QPen(Qt.GlobalColor.darkCyan, 2, Qt.DashLine))
-        y_mid = rect.center().y()
-        painter.drawLine(rect.left(), y_mid, rect.right(), y_mid)
-
-        painter.setPen(QPen(Qt.GlobalColor.black, 1))
-        painter.drawText(rect.left(), rect.bottom() + 22, "00:00")
-        painter.drawText(rect.center().x() - 24, rect.bottom() + 22, "01:00")
-        painter.drawText(rect.right() - 44, rect.bottom() + 22, "02:00")
-
-        painter.setPen(QPen(Qt.GlobalColor.darkCyan, 1))
-        painter.drawText(rect.left(), 48, "Placeholder - pendiente de métricas en vivo")
 
 
 class NodeTable(QFrame):
@@ -753,12 +720,8 @@ class App(QMainWindow):
         cards.addWidget(self.time_card)
         layout.addLayout(cards)
 
-        lower = QHBoxLayout()
-        lower.setSpacing(16)
-        lower.addWidget(TrendChart(), 1)
         self.node_table = NodeStatusTable()
-        lower.addWidget(self.node_table, 1)
-        layout.addLayout(lower)
+        layout.addWidget(self.node_table)
 
         log_title = QLabel("Salida de logs")
         log_title.setObjectName("fieldLabel")
