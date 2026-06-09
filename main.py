@@ -592,7 +592,7 @@ class App(QMainWindow):
 
         cards = QHBoxLayout()
         cards.setSpacing(16)
-        self.pixel_card = self.metric_card("Píxeles procesables", "0 px")
+        self.pixel_card = self.metric_card("Píxeles procesados", "0 px")
         self.batch_card = self.metric_card("Imágenes seleccionadas", "0")
         self.rate_card = self.metric_card("Rendimiento", "Pendiente")
         self.time_card = self.metric_card("Tiempo total", "Pendiente")
@@ -678,6 +678,7 @@ class App(QMainWindow):
                 checkbox.setToolTip("Reservado para conectar una salida de escala de grises independiente.")
             for flag in flags:
                 used_flags.add(flag)
+            checkbox.stateChanged.connect(lambda _state: self.refresh_metrics())
             self.option_checks.append(checkbox)
             checks_layout.addWidget(checkbox)
         layout.addLayout(checks_layout)
@@ -813,15 +814,25 @@ class App(QMainWindow):
                     flags.append(flag)
         return flags
 
+    def selected_operation_count(self):
+        selected = self.selected_flags()
+        if selected:
+            return len(selected)
+        return sum(len(flags) for _label, flags, status in PROCESS_OPTIONS if status == "functional")
+
+    def processed_pixel_count(self, paths):
+        input_pixels = sum(read_bmp_pixels(path) for path in paths)
+        return input_pixels * self.selected_operation_count()
+
     def refresh_metrics(self):
         image_count = len(self.image_paths)
-        pixels = sum(read_bmp_pixels(path) for path in self.image_paths)
         runnable = min(image_count, MAX_BACKEND_IMAGES)
+        processed_pixels = self.processed_pixel_count(self.image_paths[:MAX_BACKEND_IMAGES])
 
         self.progress_bar.setValue(100 if self.last_elapsed and runnable else 0)
         self.progress_count.setText(f"0 / {runnable} imágenes conectadas al backend actual")
         self.progress_eta.setText("Tiempo estimado restante: placeholder hasta ejecución asíncrona por lote completo")
-        self.pixel_card.value_label.setText(format_scientific(pixels, "px"))
+        self.pixel_card.value_label.setText(format_scientific(processed_pixels, "px"))
         if image_count > MAX_BACKEND_IMAGES:
             self.batch_card.value_label.setText(f"{runnable} de {image_count}")
         else:
@@ -866,12 +877,19 @@ class App(QMainWindow):
             self.progress_count.setText(f"{runnable} / {runnable} imágenes conectadas al backend actual")
         self.progress_eta.setText("Tiempo estimado restante: 00:00:00")
         self.time_card.value_label.setText(f"{elapsed:.1f} s")
-        pixels = sum(read_bmp_pixels(path) for path in self.image_paths[:MAX_BACKEND_IMAGES])
-        if elapsed > 0:
-            self.rate_card.value_label.setText(format_scientific(pixels / elapsed, "px/s"))
+        processed_pixels = self.processed_pixel_count(self.image_paths[:MAX_BACKEND_IMAGES])
+        metric_elapsed = elapsed
         match = re.search(r"Tiempo total MPI:\s*([0-9.]+)", output)
         if match:
-            self.time_card.value_label.setText(f"{float(match.group(1)):.1f} s")
+            metric_elapsed = float(match.group(1))
+            self.time_card.value_label.setText(f"{metric_elapsed:.1f} s")
+        if metric_elapsed > 0:
+            self.rate_card.value_label.setText(format_scientific(processed_pixels / metric_elapsed, "px/s"))
+        output += (
+            "\n\nMetrica de rendimiento:\n"
+            f"Pixeles procesados: {format_scientific(processed_pixels, 'px')}\n"
+            f"Rendimiento: {format_scientific(processed_pixels / metric_elapsed, 'px/s') if metric_elapsed > 0 else 'Pendiente'}\n"
+        )
         self.log_box.setText(output)
         self.run_button.setEnabled(True)
         self.system_state.setText("Estado: Listo")
