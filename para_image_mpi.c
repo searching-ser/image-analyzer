@@ -10,6 +10,7 @@
 
 #define MAX_IMAGES 1000
 #define MAX_PATH_LEN 260
+#define LOCAL_PATH_LEN 1024
 #define MAX_MASK_LEN 160
 #define MPI_TAG_WORK 100
 #define MPI_TAG_DONE 101
@@ -119,6 +120,19 @@ static int copy_file(const char *source_path, const char *destination_path)
     fclose(source);
     fclose(destination);
     return 1;
+}
+
+static char *build_image_path(const char *directory, const char *image_name)
+{
+    size_t needed = strlen(directory) + strlen(image_name) + strlen(".bmp") + 2;
+    char *path = malloc(needed);
+
+    if (path == NULL) {
+        return NULL;
+    }
+
+    snprintf(path, needed, "%s/%s.bmp", directory, image_name);
+    return path;
 }
 
 static int has_bmp_extension(const char *path)
@@ -375,21 +389,27 @@ static void process_image_index(int rank, int image_index, char image_paths[][MA
 {
     char shared_image[MAX_PATH_LEN];
     char image_name[MAX_PATH_LEN];
-    char local_image[MAX_PATH_LEN];
+    char *local_image = NULL;
 
     normalize_shared_path(image_paths[image_index], shared_image, sizeof(shared_image));
     get_base_name(shared_image, image_name, sizeof(image_name));
-    snprintf(local_image, sizeof(local_image), "%s/%s.bmp", local_input_dir, image_name);
+    local_image = build_image_path(local_input_dir, image_name);
+    if (local_image == NULL) {
+        printf("[rank %d] ruta local demasiado larga para %s\n", rank, shared_image);
+        return;
+    }
 
     printf("[rank %d] copiando entrada %s -> %s\n", rank, shared_image, local_image);
     if (!copy_file(shared_image, local_image)) {
         printf("[rank %d] no pudo copiar %s\n", rank, shared_image);
+        free(local_image);
         return;
     }
 
     printf("[rank %d] procesando %s\n", rank, local_image);
     process_image(local_image, flags, kernel);
     printf("[rank %d] termino %s\n", rank, local_image);
+    free(local_image);
 }
 
 int main(int argc, char *argv[])
@@ -400,9 +420,9 @@ int main(int argc, char *argv[])
     int kernel = 27;
     char output_dir[MAX_PATH_LEN] = {0};
     char shared_output_dir[MAX_PATH_LEN] = {0};
-    char local_root_dir[MAX_PATH_LEN] = {0};
-    char local_input_dir[MAX_PATH_LEN] = {0};
-    char local_output_dir[MAX_PATH_LEN] = {0};
+    char local_root_dir[LOCAL_PATH_LEN] = {0};
+    char local_input_dir[LOCAL_PATH_LEN] = {0};
+    char local_output_dir[LOCAL_PATH_LEN] = {0};
     char image_paths[MAX_IMAGES][MAX_PATH_LEN];
     int image_count = 0;
     ProcessFlags flags;
@@ -485,9 +505,17 @@ int main(int argc, char *argv[])
 
     omp_set_num_threads(num_threads);
     normalize_shared_path(output_dir, shared_output_dir, sizeof(shared_output_dir));
-    snprintf(local_root_dir, sizeof(local_root_dir), "/tmp/image-analyzer-rank-%d", rank);
-    snprintf(local_input_dir, sizeof(local_input_dir), "%s/input", local_root_dir);
-    snprintf(local_output_dir, sizeof(local_output_dir), "%s/output", local_root_dir);
+    int root_len = snprintf(local_root_dir, sizeof(local_root_dir), "/tmp/image-analyzer-rank-%d", rank);
+    int input_len = snprintf(local_input_dir, sizeof(local_input_dir), "/tmp/image-analyzer-rank-%d/input", rank);
+    int output_len = snprintf(local_output_dir, sizeof(local_output_dir), "/tmp/image-analyzer-rank-%d/output", rank);
+
+    if (root_len < 0 || input_len < 0 || output_len < 0 ||
+        (size_t)root_len >= sizeof(local_root_dir) ||
+        (size_t)input_len >= sizeof(local_input_dir) ||
+        (size_t)output_len >= sizeof(local_output_dir)) {
+        printf("Error: No se pudieron construir las rutas temporales locales\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
     if (!ensure_directory(local_root_dir) ||
         !ensure_directory(local_input_dir) ||
